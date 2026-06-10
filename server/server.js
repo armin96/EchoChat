@@ -11,15 +11,12 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const server = http.createServer(app);
+app.get('/', (req, res) => res.json({ status: 'ok', message: 'EchoChat server is running' }));
 const io = new Server(server, {
     cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-const mongoURI = "mongo URL";
-
-mongoose.connect(mongoURI)
-    .then(() => console.log("✅ Connected to MongoDB Atlas"))
-    .catch(err => console.error("❌ Connection error:", err));
+const mongoURI = "mongodb://127.0.0.1:27017/echochat";
 
 // مدل کاربر
 const userSchema = new mongoose.Schema({
@@ -40,6 +37,25 @@ const messageSchema = new mongoose.Schema({
     timestamp: { type: Date, default: Date.now }
 });
 const Message = mongoose.model('Message', messageSchema);
+
+mongoose.connect(mongoURI)
+    .then(async () => {
+        console.log("✅ Connected to MongoDB Atlas");
+        try {
+            const count = await User.countDocuments();
+            if (count === 0) {
+                const testUsers = [
+                    { username: 'armin', password: '123', displayName: 'Armin', avatar: '' },
+                    { username: 'echo', password: '123', displayName: 'Echo Bot', avatar: '' }
+                ];
+                await User.insertMany(testUsers);
+                console.log("🌱 Default test users seeded successfully!");
+            }
+        } catch (e) {
+            console.error("❌ Seeding error:", e);
+        }
+    })
+    .catch(err => console.error("❌ Connection error:", err));
 
 const userSockets = {};  
 const lastSeenData = {}; 
@@ -79,33 +95,62 @@ app.get('/messages/:userId/:otherId', async (req, res) => {
     } catch (err) { res.json([]); }
 });
 
+app.post('/update-profile', async (req, res) => {
+    try {
+        const { userId, avatar } = req.body;
+        const updatedUser = await User.findByIdAndUpdate(userId, { avatar }, { new: true });
+        // Emit to all connected clients that profile was updated
+        io.emit('profile_updated', { userId: updatedUser._id, avatar: updatedUser.avatar });
+        res.json(updatedUser);
+    } catch (err) {
+        res.status(500).json({ error: "Failed to update profile" });
+    }
+});
+
+app.post('/update-username', async (req, res) => {
+    try {
+        const { userId, newUsername } = req.body;
+        // Check if username is already taken
+        const existing = await User.findOne({ username: newUsername });
+        if (existing) {
+            return res.status(400).json({ error: "Username already taken." });
+        }
+        const updatedUser = await User.findByIdAndUpdate(userId, { username: newUsername }, { new: true });
+        io.emit('profile_updated', { userId: updatedUser._id, avatar: updatedUser.avatar, username: updatedUser.username });
+        res.json(updatedUser);
+    } catch (err) {
+        res.status(500).json({ error: "Failed to update username" });
+    }
+});
+
 // سوکت (Socket.io)
 io.on('connection', (socket) => {
+
+    // ثبت سوکت کاربر
     socket.on('register_socket', (userId) => {
         userSockets[userId] = socket.id;
         lastSeenData[userId] = "online";
         io.emit('user_status_change', { userId, status: "online" });
     });
 
+    // ارسال وضعیت همه کاربران
+    socket.on('get_all_statuses', () => {
+        socket.emit('all_statuses', lastSeenData);
+    });
+
+    // ارسال پیام خصوصی
     socket.on('private_message', async (data) => {
         try {
-            // ۱. ساخت پیام جدید با در نظر گرفتن نوع (Type)
             const newMessage = new Message({
                 senderId: data.senderId,
                 receiverId: data.receiverId,
                 content: data.content,
-                type: data.type || 'text', // دریافت نوع از اندروید یا وب
+                type: data.type || 'text',
                 timestamp: new Date()
             });
-
-            // ۲. ذخیره در دیتابیس
             const savedMessage = await newMessage.save();
-
-            // ۳. پیدا کردن سوکت گیرنده
             const receiverSocketId = userSockets[data.receiverId];
-            
             if (receiverSocketId) {
-                // ارسال کل آبجکت ذخیره شده به گیرنده (شامل فیلد type)
                 io.to(receiverSocketId).emit('receive_message', savedMessage);
             }
         } catch (error) {
@@ -113,6 +158,39 @@ io.on('connection', (socket) => {
         }
     });
 
+    // 📞 شروع تماس ویدیویی
+    socket.on('make_call', (data) => {
+        const receiverSocketId = userSockets[data.receiverId];
+        if (receiverSocketId) {
+            io.to(receiverSocketId).emit('incoming_call', {
+                callerName: data.callerName,
+                callerId:   data.callerId,
+                channelName: data.channelName
+            });
+            console.log(`📞 Call from ${data.callerId} → ${data.receiverId}`);
+        } else {
+            // گیرنده آفلاینه
+            socket.emit('call_rejected', { reason: 'User is offline' });
+        }
+    });
+
+    // ✅ قبول تماس
+    socket.on('accept_call', (data) => {
+        const callerSocketId = userSockets[data.callerId];
+        if (callerSocketId) {
+            io.to(callerSocketId).emit('call_accepted', { channelName: data.channelName });
+        }
+    });
+
+    // ❌ پایان / رد تماس
+    socket.on('end_call', (data) => {
+        const receiverSocketId = userSockets[data.receiverId];
+        if (receiverSocketId) {
+            io.to(receiverSocketId).emit('call_ended');
+        }
+    });
+
+    // قطع اتصال
     socket.on('disconnect', () => {
         const userId = Object.keys(userSockets).find(key => userSockets[key] === socket.id);
         if (userId) {
