@@ -42,6 +42,15 @@ export default function App() {
   const [inCall, setInCall] = useState(false);
   const [localTracks, setLocalTracks] = useState([]);
   const [incomingCall, setIncomingCall] = useState(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [zoomedAvatar, setZoomedAvatar] = useState(null);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [editingUsername, setEditingUsername] = useState(false);
+  const [newUsername, setNewUsername] = useState("");
+
+  const activeChatRef = useRef(null);
+  useEffect(() => { activeChatRef.current = activeChat; }, [activeChat]);
 
   const scrollRef = useRef();
   const fileInputRef = useRef();
@@ -49,6 +58,9 @@ export default function App() {
   const localVideoRef = useRef();
   const remoteVideoRef = useRef();
   const ringtoneRef = useRef(new Audio("https://assets.mixkit.co/active_storage/sfx/1358/1358-preview.mp3"));
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const recordingTimerRef = useRef(null);
 
   // Initial load from LocalStorage
   useEffect(() => {
@@ -67,12 +79,28 @@ export default function App() {
       socket.on('all_statuses', (data) => setOnlineUsers(data));
       socket.on('user_status_change', (data) => setOnlineUsers(prev => ({ ...prev, [data.userId]: data.status })));
       socket.on('receive_message', (data) => {
-        setActiveChat(currentActive => {
-          if (currentActive && (data.senderId === currentActive._id || data.receiverId === currentActive._id)) {
-            setMessages(prev => [...prev, data]);
-          }
-          return currentActive;
-        });
+        fetchChats(); // Refresh contacts list to ensure new users appear
+        const currentActive = activeChatRef.current;
+        if (currentActive && (data.senderId === currentActive._id || data.receiverId === currentActive._id)) {
+          setMessages(prev => {
+            // Strong duplicate check
+            const exists = prev.some(m => {
+              if (m._id && data._id && m._id === data._id) return true;
+              if (m.content === data.content) {
+                const t1 = new Date(m.timestamp).getTime();
+                const t2 = new Date(data.timestamp).getTime();
+                if (!isNaN(t1) && !isNaN(t2) && Math.abs(t1 - t2) < 5000) return true;
+              }
+              return false;
+            });
+            if (exists) return prev;
+            return [...prev, data];
+          });
+        }
+      });
+      socket.on('profile_updated', (data) => {
+        setChats(prev => prev.map(c => c._id === data.userId ? { ...c, avatar: data.avatar } : c));
+        setActiveChat(current => current?._id === data.userId ? { ...current, avatar: data.avatar } : current);
       });
       socket.on('incoming_call', (data) => { 
         setIncomingCall(data); 
@@ -83,7 +111,7 @@ export default function App() {
     }
     return () => {
       socket.off('all_statuses'); socket.off('user_status_change'); socket.off('receive_message');
-      socket.off('incoming_call'); socket.off('call_accepted'); socket.off('call_ended');
+      socket.off('profile_updated'); socket.off('incoming_call'); socket.off('call_accepted'); socket.off('call_ended');
     };
   }, [user]);
 
@@ -145,10 +173,34 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
+  const handleUsernameUpdate = async () => {
+    if (!newUsername.trim() || newUsername === user.username) {
+      setEditingUsername(false);
+      return;
+    }
+    const res = await fetch('http://localhost:3000/update-username', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: user._id, newUsername })
+    });
+    if (res.ok) {
+      const updatedUser = await res.json();
+      setUser(updatedUser);
+      localStorage.setItem('chat_user', JSON.stringify(updatedUser));
+      setEditingUsername(false);
+    } else {
+      const errorData = await res.json();
+      alert(errorData.error || "Failed to update username");
+    }
+  };
+
   const renderAvatar = (u, size = "w-10 h-10", showBadge = false) => {
     const isOnline = onlineUsers[u?._id] === "online";
     return (
-      <div className="relative flex-shrink-0">
+      <div 
+        className={`relative flex-shrink-0 ${u?.avatar ? 'cursor-pointer hover:opacity-90 transition-opacity' : ''}`}
+        onClick={() => { if (u?.avatar) setZoomedAvatar(u.avatar); }}
+      >
         {u?.avatar ? (
           <img src={u.avatar} alt="p" className={`${size} rounded-full object-cover`} />
         ) : (
@@ -177,6 +229,49 @@ export default function App() {
     setMessages(prev => [...prev, msgData]);
     setNewMessage("");
     setShowEmoji(false);
+  };
+
+  const startRecording = async () => {
+    if (!activeChat) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+      mediaRecorder.ondataavailable = e => audioChunksRef.current.push(e.data);
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const msgData = {
+            senderId: user._id,
+            receiverId: activeChat._id,
+            content: reader.result,
+            type: 'audio',
+            timestamp: new Date()
+          };
+          socket.emit('private_message', msgData);
+          setMessages(prev => [...prev, msgData]);
+        };
+        reader.readAsDataURL(blob);
+        stream.getTracks().forEach(t => t.stop());
+        clearInterval(recordingTimerRef.current);
+        setRecordingTime(0);
+      };
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+      recordingTimerRef.current = setInterval(() => setRecordingTime(t => t + 1), 1000);
+    } catch (err) {
+      alert('Microphone access denied.');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
   };
 
   const handleFileUpload = (e) => {
@@ -266,18 +361,110 @@ export default function App() {
 
   // Login/Register Screen
   if (!user) return (
-    <div className="fixed inset-0 flex items-center justify-center bg-[#111b21]">
-      <div className="p-8 bg-[#202c33] rounded-xl shadow-2xl w-full max-w-md text-white text-center">
-        <h2 className="text-3xl font-bold mb-8 text-[#00a884]">WhatsApp</h2>
-        <form onSubmit={handleAuth} className="space-y-4">
-          {authMode === 'register' && <input type="text" placeholder="Display Name" className="w-full p-3 rounded bg-[#2a3942] outline-none" onChange={e => setFormData({...formData, displayName: e.target.value})} />}
-          <input type="text" placeholder="Username" className="w-full p-3 rounded bg-[#2a3942] outline-none" onChange={e => setFormData({...formData, username: e.target.value})} />
-          <input type="password" placeholder="Password" className="w-full p-3 rounded bg-[#2a3942] outline-none" onChange={e => setFormData({...formData, password: e.target.value})} />
-          <button className="w-full bg-[#00a884] p-3 rounded font-bold">{authMode === 'login' ? 'Login' : 'Sign Up'}</button>
+    <div className="auth-screen">
+      {/* Animated background orbs */}
+      <div className="orb orb-1" />
+      <div className="orb orb-2" />
+      <div className="orb orb-3" />
+      <div className="orb orb-4" />
+
+      {/* Floating particles */}
+      {[...Array(20)].map((_, i) => (
+        <div key={i} className="particle" style={{
+          left: `${Math.random() * 100}%`,
+          animationDelay: `${Math.random() * 8}s`,
+          animationDuration: `${6 + Math.random() * 6}s`,
+          width: `${2 + Math.random() * 4}px`,
+          height: `${2 + Math.random() * 4}px`,
+          opacity: 0.3 + Math.random() * 0.4
+        }} />
+      ))}
+
+      <div className="auth-card">
+        {/* Logo area */}
+        <div className="auth-logo">
+          <div className="auth-logo-icon">
+            <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" className="auth-logo-svg">
+              <circle cx="24" cy="24" r="22" fill="url(#logoGrad)" />
+              <path d="M24 12C17.373 12 12 17.373 12 24C12 26.4 12.672 28.644 13.836 30.552L12 36L17.676 34.2C19.512 35.268 21.684 35.904 24 35.904C30.627 35.904 36 30.531 36 23.904C36 17.277 30.627 12 24 12Z" fill="white" opacity="0.9"/>
+              <path d="M19 22.5C19 22.5 20.5 21 22 21C23.5 21 24.5 22.5 24.5 22.5C24.5 22.5 25.5 24 27 24C28.5 24 29.5 22.5 29.5 22.5" stroke="url(#logoGrad)" strokeWidth="2" strokeLinecap="round"/>
+              <defs>
+                <linearGradient id="logoGrad" x1="0" y1="0" x2="48" y2="48">
+                  <stop offset="0%" stopColor="#00d4aa"/>
+                  <stop offset="100%" stopColor="#0088ff"/>
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+          <h1 className="auth-app-name">EchoChat</h1>
+          <p className="auth-tagline">Connect. Chat. Echo.</p>
+        </div>
+
+        {/* Mode tabs */}
+        <div className="auth-tabs">
+          <button
+            className={`auth-tab ${authMode === 'login' ? 'active' : ''}`}
+            onClick={() => setAuthMode('login')}
+          >Sign In</button>
+          <button
+            className={`auth-tab ${authMode === 'register' ? 'active' : ''}`}
+            onClick={() => setAuthMode('register')}
+          >Sign Up</button>
+          <div className="auth-tab-slider" style={{ transform: authMode === 'login' ? 'translateX(0)' : 'translateX(100%)' }} />
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleAuth} className="auth-form">
+          {authMode === 'register' && (
+            <div className="auth-field" style={{ animation: 'slideDown 0.3s ease' }}>
+              <label className="auth-label">Display Name</label>
+              <div className="auth-input-wrap">
+                <svg className="auth-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                <input
+                  type="text"
+                  placeholder="Your display name"
+                  className="auth-input"
+                  onChange={e => setFormData({...formData, displayName: e.target.value})}
+                />
+              </div>
+            </div>
+          )}
+          <div className="auth-field">
+            <label className="auth-label">Username</label>
+            <div className="auth-input-wrap">
+              <svg className="auth-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              <input
+                type="text"
+                placeholder="Enter your username"
+                className="auth-input"
+                onChange={e => setFormData({...formData, username: e.target.value})}
+              />
+            </div>
+          </div>
+          <div className="auth-field">
+            <label className="auth-label">Password</label>
+            <div className="auth-input-wrap">
+              <svg className="auth-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <input
+                type="password"
+                placeholder="Enter your password"
+                className="auth-input"
+                onChange={e => setFormData({...formData, password: e.target.value})}
+              />
+            </div>
+          </div>
+          <button type="submit" className="auth-btn">
+            <span>{authMode === 'login' ? 'Sign In' : 'Create Account'}</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="auth-btn-icon"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </button>
         </form>
-        <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="mt-4 text-[#00a884] text-xs underline">
-          {authMode === 'login' ? "Don't have an account? Sign Up" : "Already have an account? Login"}
-        </button>
+
+        <p className="auth-switch">
+          {authMode === 'login' ? "Don't have an account? " : "Already have an account? "}
+          <button className="auth-switch-btn" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>
+            {authMode === 'login' ? 'Sign Up' : 'Sign In'}
+          </button>
+        </p>
       </div>
     </div>
   );
@@ -285,28 +472,61 @@ export default function App() {
   return (
     <div className="fixed inset-0 flex overflow-hidden transition-all duration-300" style={{ backgroundColor: currentTheme.bg, color: currentTheme.text }}>
       
+      {/* Zoomed Avatar Overlay */}
+      {zoomedAvatar && (
+        <div className="fixed inset-0 bg-black/90 z-[900] flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setZoomedAvatar(null)}>
+          <button className="absolute top-6 right-6 text-white/70 hover:text-white transition-colors">
+            <X size={32}/>
+          </button>
+          <img src={zoomedAvatar} alt="Zoomed" className="max-w-full max-h-full rounded-2xl shadow-2xl object-contain animate-pulse-once" style={{ animation: 'scaleIn 0.3s ease-out forwards' }} onClick={(e) => e.stopPropagation()} />
+        </div>
+      )}
+
       {/* Settings Modal */}
       {showSettings && (
         <div className="fixed inset-0 bg-black/80 z-[600] flex items-center justify-center p-4 backdrop-blur-sm">
             <div className="p-8 rounded-3xl w-full max-w-2xl flex flex-col md:flex-row gap-8 relative shadow-2xl" style={{ backgroundColor: currentTheme.sidebar }}>
-                <button onClick={() => setShowSettings(false)} className="absolute top-4 right-4"><X/></button>
+                <button onClick={() => setShowSettings(false)} className="chat-close-btn"><X size={18}/></button>
                 <div className="flex-1 text-center border-r border-white/10 pr-4">
-                    <h3 className="text-xl font-bold mb-6 flex items-center justify-center gap-2"><User/> Profile</h3>
+                    <h3 className="text-xl font-bold mb-6 flex items-center justify-center gap-2"><User size={18}/> Profile</h3>
                     <div className="relative w-32 h-32 mx-auto mb-4 group">
                         {renderAvatar(user, "w-full h-full text-4xl")}
                         <button onClick={() => profileInputRef.current.click()} className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all"><Camera/></button>
                         <input type="file" ref={profileInputRef} className="hidden" accept="image/*" onChange={handleProfileUpload} />
                     </div>
                     <p className="font-bold text-lg">{user.displayName}</p>
-                    <button onClick={() => { localStorage.removeItem('chat_user'); setUser(null); }} className="mt-4 flex items-center gap-2 bg-red-500/20 text-red-500 px-6 py-2 rounded-full mx-auto"><LogOut size={18}/> Logout</button>
+                    {editingUsername ? (
+                      <div className="flex items-center justify-center gap-2 mb-6 mt-1">
+                        <span className="font-mono text-white/50">@</span>
+                        <input 
+                          className="bg-black/20 text-white rounded px-2 py-1 outline-none font-mono w-32 border border-white/20 focus:border-white/50" 
+                          value={newUsername} 
+                          autoFocus
+                          onChange={(e) => setNewUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))} 
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleUsernameUpdate(); if (e.key === 'Escape') setEditingUsername(false); }}
+                        />
+                        <button onClick={handleUsernameUpdate} className="text-green-500 hover:text-green-400 p-1"><Check size={18}/></button>
+                        <button onClick={() => setEditingUsername(false)} className="text-red-500 hover:text-red-400 p-1"><X size={18}/></button>
+                      </div>
+                    ) : (
+                      <p className="text-sm opacity-60 mb-6 font-mono cursor-pointer hover:opacity-100 flex justify-center items-center gap-2 transition-opacity" onClick={() => { setNewUsername(user.username); setEditingUsername(true); }}>
+                        @{user.username} <span className="text-[10px] uppercase bg-white/10 px-2 py-0.5 rounded-full">Edit</span>
+                      </p>
+                    )}
+                    <button onClick={() => { localStorage.removeItem('chat_user'); setUser(null); }} className="settings-logout-btn"><LogOut size={16}/> Logout</button>
                 </div>
                 <div className="flex-1 pl-4 flex flex-col overflow-hidden">
-                    <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><Palette/> Themes</h3>
+                    <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><Palette size={18}/> Themes</h3>
                     <div className="grid grid-cols-2 gap-3 overflow-y-auto pr-2 custom-scrollbar" style={{maxHeight:'300px'}}>
                         {themes.map(t => (
-                            <div key={t.id} onClick={() => { setCurrentTheme(t); localStorage.setItem('app_theme', t.id); }} className={`p-3 rounded-xl cursor-pointer border-2 transition-all flex items-center justify-between ${currentTheme.id === t.id ? 'border-[#00a884]' : 'border-white/10'}`} style={{ backgroundColor: t.header }}>
-                                <span className="text-[10px] truncate" style={{ color: t.text }}>{t.name}</span>
-                                {currentTheme.id === t.id && <Check size={14} className="text-[#00a884]"/>}
+                            <div key={t.id} onClick={() => { setCurrentTheme(t); localStorage.setItem('app_theme', t.id); }} className={`theme-card ${currentTheme.id === t.id ? 'active' : ''}`} style={{ backgroundColor: t.header }}>
+                                <div className="theme-dots">
+                                  <span style={{background:t.primary}}/>
+                                  <span style={{background:t.bubble}}/>
+                                  <span style={{background:t.sidebar}}/>
+                                </div>
+                                <span className="theme-name" style={{ color: t.text }}>{t.name}</span>
+                                {currentTheme.id === t.id && <Check size={12} className="theme-check"/>}
                             </div>
                         ))}
                     </div>
@@ -318,14 +538,14 @@ export default function App() {
       {/* Call UI */}
       {incomingCall && !inCall && (
         <div className="fixed inset-0 bg-black/95 z-[700] flex flex-col items-center justify-center text-center">
-            <div className="w-32 h-32 mb-6 border-4 border-[#00a884] rounded-full p-1 animate-pulse">
+            <div className="call-avatar-ring">
                 {renderAvatar({displayName: incomingCall.callerName}, "w-full h-full text-4xl")}
             </div>
             <h2 className="text-2xl font-bold text-white mb-2">{incomingCall.callerName}</h2>
-            <p className="text-white/60 mb-8">Incoming Call...</p>
-            <div className="flex gap-12 mt-12">
-                <button onClick={() => { socket.emit('accept_call', { callerId: incomingCall.callerId, channelName: incomingCall.channelName }); setIncomingCall(null); }} className="bg-green-500 p-6 rounded-full text-white"><Phone size={32}/></button>
-                <button onClick={() => { socket.emit('end_call', { receiverId: incomingCall.callerId }); setIncomingCall(null); ringtoneRef.current.pause(); }} className="bg-red-500 p-6 rounded-full text-white"><PhoneOff size={32}/></button>
+            <p className="text-white/50 mb-8 text-sm tracking-widest uppercase">Incoming call…</p>
+            <div className="flex gap-12 mt-4">
+                <button onClick={() => { joinRoom(incomingCall.channelName); socket.emit('accept_call', { callerId: incomingCall.callerId, channelName: incomingCall.channelName }); setIncomingCall(null); }} className="call-btn accept"><Phone size={28}/></button>
+                <button onClick={() => { socket.emit('end_call', { receiverId: incomingCall.callerId }); setIncomingCall(null); ringtoneRef.current.pause(); }} className="call-btn decline"><PhoneOff size={28}/></button>
             </div>
         </div>
       )}
@@ -333,94 +553,205 @@ export default function App() {
       {inCall && (
         <div className="fixed inset-0 bg-black z-[800] flex items-center justify-center">
             <div ref={remoteVideoRef} className="w-full h-full object-cover"></div>
-            <div ref={localVideoRef} className="absolute top-6 right-6 w-40 h-60 border-2 border-[#00a884] rounded-2xl overflow-hidden z-10 shadow-2xl"></div>
-            <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-20"><button onClick={() => { socket.emit('end_call', { receiverId: activeChat?._id }); closeCallLocal(); }} className="bg-red-500 p-5 rounded-full text-white"><PhoneOff size={30}/></button></div>
+            <div ref={localVideoRef} className="absolute top-6 right-6 w-40 h-60 border-2 border-[#00d4aa] rounded-2xl overflow-hidden z-10 shadow-2xl"></div>
+            <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-20"><button onClick={() => { socket.emit('end_call', { receiverId: activeChat?._id }); closeCallLocal(); }} className="call-btn decline"><PhoneOff size={28}/></button></div>
         </div>
       )}
 
-      {/* Sidebar - Chat List */}
-      <div className="w-[400px] flex flex-col border-r border-white/10" style={{ backgroundColor: currentTheme.sidebar }}>
-        <div className="h-[60px] flex justify-between items-center px-4" style={{ backgroundColor: currentTheme.header }}>
-          <div className="cursor-pointer" onClick={() => setShowSettings(true)}>{renderAvatar(user)}</div>
-          <div className="flex gap-4 opacity-70"><Settings size={20} className="cursor-pointer" onClick={() => setShowSettings(true)} /><Palette size={20} className="cursor-pointer" onClick={() => setShowSettings(true)} /></div>
-        </div>
-        <div className="flex-1 overflow-y-auto custom-scrollbar">
-          {chats.map(c => (
-            <div key={c._id} onClick={() => setActiveChat(c)} className={`flex items-center p-4 cursor-pointer transition-colors ${activeChat?._id === c._id ? 'bg-white/10 border-l-4 border-[#00a884]' : 'hover:bg-white/5'}`}>
-              {renderAvatar(c, "w-12 h-12", true)}
-              <div className="ml-4 flex-1">
-                <div className="font-semibold">{c.displayName}</div>
-                <div className="text-[10px] opacity-50">{onlineUsers[c._id] === "online" ? "Online" : "Offline"}</div>
-              </div>
+      {/* ═══ SIDEBAR ═══ */}
+      <div className="chat-sidebar" style={{ backgroundColor: currentTheme.sidebar }}>
+        {/* Sidebar Header */}
+        <div className="chat-sidebar-header" style={{ backgroundColor: currentTheme.header }}>
+          <div className="chat-sidebar-brand">
+            <div className="chat-brand-logo">
+              <svg viewBox="0 0 24 24" fill="none" style={{width:20,height:20}}>
+                <circle cx="12" cy="12" r="10" fill="url(#sideGrad)"/>
+                <path d="M8 12c0 0 1 1.5 2 1.5S12 12 12 12s1 1.5 2 1.5 2-1.5 2-1.5" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+                <defs><linearGradient id="sideGrad" x1="0" y1="0" x2="24" y2="24"><stop stopColor="#00d4aa"/><stop offset="1" stopColor="#0088ff"/></linearGradient></defs>
+              </svg>
             </div>
-          ))}
+            <span className="chat-brand-name">EchoChat</span>
+          </div>
+          <div className="chat-sidebar-actions">
+            <button className="chat-icon-btn" onClick={() => setShowSettings(true)} title="Settings"><Settings size={17}/></button>
+            <button className="chat-icon-btn" onClick={() => setShowSettings(true)} title="Themes"><Palette size={17}/></button>
+            <div className="cursor-pointer" onClick={() => setShowSettings(true)}>{renderAvatar(user)}</div>
+          </div>
+        </div>
+
+        {/* Search bar */}
+        <div className="chat-search-wrap">
+          <div className="chat-search" style={{ backgroundColor: currentTheme.chatBg }}>
+            <svg className="chat-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            <input 
+              className="chat-search-input" 
+              placeholder="Search by name or @id…" 
+              style={{ color: currentTheme.text, backgroundColor: 'transparent' }} 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* Contacts list */}
+        <div className="chat-contacts custom-scrollbar">
+          {chats.filter(c => 
+            (c.displayName && c.displayName.toLowerCase().includes(searchQuery.toLowerCase())) || 
+            (c.username && c.username.toLowerCase().includes(searchQuery.toLowerCase()))
+          ).map(c => {
+            const isActive = activeChat?._id === c._id;
+            const isOnline = onlineUsers[c._id] === "online";
+            return (
+              <div
+                key={c._id}
+                onClick={() => setActiveChat(c)}
+                className={`chat-contact-item ${isActive ? 'active' : ''}`}
+              >
+                {isActive && <div className="chat-contact-bar" style={{background: currentTheme.primary}}/>}
+                <div className="relative flex-shrink-0">
+                  {renderAvatar(c, "w-12 h-12", true)}
+                </div>
+                <div className="chat-contact-info">
+                  <div className="chat-contact-name" style={{color: currentTheme.text}}>
+                    {c.displayName}
+                    <span className="text-xs opacity-50 ml-2 font-mono hidden md:inline">@{c.username}</span>
+                  </div>
+                  <div className={`chat-contact-status ${isOnline ? 'online' : ''}`}>
+                    <span className="status-dot"/>
+                    {isOnline ? 'Online' : 'Offline'}
+                  </div>
+                </div>
+                {isActive && <div className="chat-contact-active-indicator" style={{background: currentTheme.primary}}/>}
+              </div>
+            );
+          })}
         </div>
       </div>
 
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col relative" style={{ backgroundColor: currentTheme.chatBg }}>
+      {/* ═══ MAIN CHAT AREA ═══ */}
+      <div className="chat-main" style={{ backgroundColor: currentTheme.chatBg }}>
         {activeChat ? (
           <>
-            <div className="h-[65px] flex justify-between items-center px-4 border-b border-white/5" style={{ backgroundColor: currentTheme.header }}>
-              <div className="flex items-center gap-3">
+            {/* Chat Header */}
+            <div className="chat-header" style={{ backgroundColor: currentTheme.header }}>
+              <div className="chat-header-left">
                 {renderAvatar(activeChat, "w-10 h-10", true)}
-                <div>
-                    <div className="font-bold">{activeChat.displayName}</div>
-                    <div className="text-[11px] opacity-60">{onlineUsers[activeChat._id] === "online" ? "Online" : "Offline"}</div>
+                <div className="chat-header-info">
+                  <div className="chat-header-name" style={{color: currentTheme.text}}>{activeChat.displayName}</div>
+                  <div className={`chat-header-status ${onlineUsers[activeChat._id] === "online" ? 'online' : ''}`}>
+                    <span className="status-dot"/>
+                    {onlineUsers[activeChat._id] === "online" ? "Active now" : "Offline"}
+                  </div>
                 </div>
               </div>
-              <div className="flex gap-6 opacity-70">
-                <Video className="cursor-pointer hover:text-[#00a884]" onClick={startCall} />
-                <Phone className="cursor-pointer hover:text-[#00a884]" onClick={startCall} />
+              <div className="chat-header-actions">
+                <button className="chat-header-btn" onClick={startCall} title="Voice call" style={{color: currentTheme.text}}><Phone size={18}/></button>
+                <button className="chat-header-btn" onClick={startCall} title="Video call" style={{color: currentTheme.text}}><Video size={18}/></button>
               </div>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 relative custom-scrollbar">
-                <div className="absolute inset-0 opacity-5 pointer-events-none" style={{ backgroundImage: `url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')` }}></div>
-                <div className="relative z-10 flex flex-col space-y-4">
-                    {messages.map((m, i) => {
-                        const onlyEmoji = m.type === 'text' && isOnlyEmoji(m.content);
-                        return (
-                          <div key={i} className={`flex ${m.senderId === user._id ? 'justify-end' : 'justify-start'}`}>
-                              <div className={`max-w-[85%] relative ${onlyEmoji ? 'bg-transparent shadow-none' : 'p-3 px-4 rounded-2xl shadow-lg'}`} 
-                                   style={{ backgroundColor: onlyEmoji ? 'transparent' : (m.senderId === user._id ? currentTheme.bubble : currentTheme.header), color: currentTheme.text }}>
-                                  {renderMessageContent(m)}
-                                  <div className={`text-[10px] text-right opacity-50 mt-1 flex items-center justify-end gap-1 ${onlyEmoji ? 'hidden' : ''}`}>
-                                    {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                    {m.senderId === user._id && <Check size={14} className="text-blue-400" />}
-                                  </div>
-                              </div>
-                          </div>
-                        );
-                    })}
-                </div>
-                <div ref={scrollRef} />
             </div>
 
-            <div className="relative min-h-[85px] flex items-center gap-4 px-6 py-3" style={{ backgroundColor: currentTheme.header }}>
-              {showEmoji && <div className="absolute bottom-24 left-6 z-50"><EmojiPicker onEmojiClick={(e) => setNewMessage(p => p + e.emoji)} theme={currentTheme.id.includes('dark') ? 'dark' : 'light'} /></div>}
-              <Smile className="cursor-pointer hover:text-[#00a884] transition-colors" size={30} onClick={() => setShowEmoji(!showEmoji)} />
-              <input type="file" ref={fileInputRef} className="hidden" accept="image/*,video/*,audio/*,.pdf" onChange={handleFileUpload} />
-              <Paperclip className="cursor-pointer opacity-70 hover:opacity-100" size={26} onClick={() => fileInputRef.current.click()} />
-              <form onSubmit={sendMessage} className="flex-1 flex items-center gap-4">
-                  <input value={newMessage} onChange={e => setNewMessage(e.target.value)} placeholder="Type a message..." className="flex-1 p-4 px-6 rounded-full outline-none text-[15px]" style={{ backgroundColor: currentTheme.sidebar, color: currentTheme.text }} />
-                  <button type="submit" className="p-4 rounded-full text-white shadow-xl hover:scale-105 active:scale-95 transition-all" style={{ backgroundColor: currentTheme.primary }}><Send size={24} /></button>
-              </form>
+            {/* Messages */}
+            <div className="chat-messages custom-scrollbar">
+              <div className="chat-messages-inner">
+                {messages.map((m, i) => {
+                  const isMine = m.senderId === user._id;
+                  const onlyEmoji = m.type === 'text' && isOnlyEmoji(m.content);
+                  return (
+                    <div key={i} className={`chat-msg-row ${isMine ? 'mine' : 'theirs'}`}>
+                      {!isMine && <div className="chat-msg-avatar">{renderAvatar(activeChat, "w-7 h-7")}</div>}
+                      <div
+                        className={`chat-bubble ${isMine ? 'mine' : 'theirs'} ${onlyEmoji ? 'emoji-only' : ''}`}
+                        style={onlyEmoji ? {} : {
+                          background: isMine
+                            ? `linear-gradient(135deg, ${currentTheme.bubble} 0%, ${currentTheme.primary}dd 100%)`
+                            : currentTheme.header,
+                          color: currentTheme.text
+                        }}
+                      >
+                        {renderMessageContent(m)}
+                        {!onlyEmoji && (
+                          <div className="bubble-meta">
+                            <span>{new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                            {isMine && <Check size={12} style={{color:'rgba(255,255,255,0.6)'}}/>}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                <div ref={scrollRef}/>
+              </div>
+            </div>
+
+            {/* Input Bar */}
+            <div className="chat-input-bar" style={{ backgroundColor: currentTheme.header }}>
+              {showEmoji && (
+                <div className="chat-emoji-picker">
+                  <EmojiPicker onEmojiClick={(e) => setNewMessage(p => p + e.emoji)} theme="dark"/>
+                </div>
+              )}
+
+              {isRecording ? (
+                /* Recording mode */
+                <div className="chat-recording-bar">
+                  <div className="chat-recording-dot"/>
+                  <span className="chat-recording-label">Recording…</span>
+                  <span className="chat-recording-time">
+                    {String(Math.floor(recordingTime / 60)).padStart(2, '0')}:{String(recordingTime % 60).padStart(2, '0')}
+                  </span>
+                  <button className="chat-icon-btn" onClick={() => { stopRecording(); setIsRecording(false); }} style={{color:'rgba(255,255,255,0.4)',marginLeft:'auto'}}>
+                    <X size={18}/>
+                  </button>
+                  <button className="chat-send-btn" onClick={stopRecording} style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)', width:44, height:44 }}>
+                    <svg viewBox="0 0 24 24" fill="currentColor" width={18} height={18}><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                  </button>
+                </div>
+              ) : (
+                /* Normal mode */
+                <>
+                  <button className="chat-icon-btn emoji-toggle" onClick={() => setShowEmoji(!showEmoji)}><Smile size={22}/></button>
+                  <input type="file" ref={fileInputRef} className="hidden" accept="image/*,video/*,audio/*,.pdf" onChange={handleFileUpload}/>
+                  <button className="chat-icon-btn" onClick={() => fileInputRef.current.click()}><Paperclip size={20}/></button>
+                  <form onSubmit={sendMessage} className="chat-input-form">
+                    <input
+                      value={newMessage}
+                      onChange={e => setNewMessage(e.target.value)}
+                      placeholder="Type a message…"
+                      className="chat-input"
+                      style={{ backgroundColor: currentTheme.chatBg, color: currentTheme.text }}
+                    />
+                    {newMessage.trim() ? (
+                      <button type="submit" className="chat-send-btn" style={{ background: `linear-gradient(135deg, ${currentTheme.primary}, #0088ff)` }}>
+                        <Send size={19}/>
+                      </button>
+                    ) : (
+                      <button type="button" className="chat-send-btn" onClick={startRecording} style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)' }}>
+                        <Mic size={19}/>
+                      </button>
+                    )}
+                  </form>
+                </>
+              )}
             </div>
           </>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center opacity-10">
-            <MessageSquare size={150}/>
-            <p className="uppercase tracking-widest font-bold mt-4 text-2xl text-center">WhatsApp Web</p>
-            <p className="mt-2 text-sm">Select a contact to start messaging</p>
+          <div className="chat-empty-state">
+            <div className="chat-empty-orb"/>
+            <div className="chat-empty-icon">
+              <MessageSquare size={48} style={{opacity:0.6}}/>
+            </div>
+            <h2 className="chat-empty-title">Welcome to EchoChat</h2>
+            <p className="chat-empty-sub">Select a conversation to start chatting</p>
+            <div className="chat-empty-dots"><span/><span/><span/></div>
           </div>
         )}
       </div>
 
-      <style jsx>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.2); border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.15); border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(128,128,128,0.35); }
       `}</style>
     </div>
   );
