@@ -1,11 +1,12 @@
-require('dotenv').config();
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const mongoose = require('mongoose');
-const cors = require('cors');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
+import 'dotenv/config';
+import express, { Request, Response, NextFunction } from 'express';
+import http from 'http';
+import { Server, Socket } from 'socket.io';
+import mongoose, { Document, Schema, Model } from 'mongoose';
+import cors from 'cors';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 
 const app = express();
 app.use(cors());
@@ -19,14 +20,36 @@ const io = new Server(server, {
     cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-const JWT_SECRET = process.env.JWT_SECRET || 'echochat_secure_jwt_secret_production_ready_2026';
+// Enforce JWT_SECRET best practices
+let JWT_SECRET: string = process.env.JWT_SECRET || '';
+if (!JWT_SECRET) {
+    if (process.env.NODE_ENV === 'production') {
+        console.error("❌ FATAL: JWT_SECRET environment variable is missing in production.");
+        process.exit(1);
+    } else {
+        console.warn("⚠️ [Security Notice]: JWT_SECRET is not set in .env. Using ephemeral cryptographically secure secret for development.");
+        JWT_SECRET = crypto.randomBytes(64).toString('hex');
+    }
+}
 const PORT = process.env.PORT || 3000;
 
 // ==========================================
-// 1. Mongoose Models & Schemas
+// 1. Mongoose Interfaces & Schemas
 // ==========================================
 
-const userSchema = new mongoose.Schema({
+export interface IUserDocument extends Document {
+    _id: mongoose.Types.ObjectId;
+    username: string;
+    password: string;
+    displayName: string;
+    avatar: string;
+    lastSeen: Date;
+    createdAt: Date;
+    updatedAt: Date;
+    comparePassword(candidatePassword: string): Promise<boolean>;
+}
+
+const userSchema = new Schema<IUserDocument>({
     username: { 
         type: String, 
         unique: true, 
@@ -54,25 +77,34 @@ const userSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // Pre-save hook: Hash password with bcrypt before saving
-userSchema.pre('save', async function (next) {
+userSchema.pre<IUserDocument>('save', async function (next) {
     if (!this.isModified('password')) return next();
     try {
         const salt = await bcrypt.genSalt(10);
         this.password = await bcrypt.hash(this.password, salt);
         next();
-    } catch (err) {
+    } catch (err: any) {
         next(err);
     }
 });
 
 // Instance method: Secure password comparison
-userSchema.methods.comparePassword = async function (candidatePassword) {
+userSchema.methods.comparePassword = async function (candidatePassword: string): Promise<boolean> {
     return bcrypt.compare(candidatePassword, this.password);
 };
 
-const User = mongoose.model('User', userSchema);
+const User: Model<IUserDocument> = mongoose.model<IUserDocument>('User', userSchema);
 
-const messageSchema = new mongoose.Schema({
+export interface IMessageDocument extends Document {
+    senderId: string;
+    receiverId: string;
+    content: string;
+    type: 'text' | 'image' | 'video' | 'audio' | 'application';
+    fileName: string;
+    timestamp: Date;
+}
+
+const messageSchema = new Schema<IMessageDocument>({
     senderId: { 
         type: String, 
         required: true, 
@@ -86,7 +118,7 @@ const messageSchema = new mongoose.Schema({
     content: { 
         type: String, 
         required: true 
-    }, // Text content or Base64 media data
+    },
     type: { 
         type: String, 
         enum: ['text', 'image', 'video', 'audio', 'application'], 
@@ -103,13 +135,17 @@ const messageSchema = new mongoose.Schema({
     }
 });
 
-const Message = mongoose.model('Message', messageSchema);
+const Message: Model<IMessageDocument> = mongoose.model<IMessageDocument>('Message', messageSchema);
 
 // ==========================================
 // 2. Authentication Helpers & Middleware
 // ==========================================
 
-const generateToken = (user) => {
+export interface AuthenticatedRequest extends Request {
+    user?: any;
+}
+
+const generateToken = (user: IUserDocument): string => {
     return jwt.sign(
         { id: user._id, username: user.username },
         JWT_SECRET,
@@ -117,7 +153,7 @@ const generateToken = (user) => {
     );
 };
 
-const sanitizeUser = (user) => ({
+const sanitizeUser = (user: IUserDocument) => ({
     _id: user._id,
     username: user.username,
     displayName: user.displayName || user.username,
@@ -125,7 +161,7 @@ const sanitizeUser = (user) => ({
     lastSeen: user.lastSeen
 });
 
-const authenticateToken = (req, res, next) => {
+const authenticateToken = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1]; // Bearer <TOKEN>
 
@@ -146,7 +182,7 @@ const authenticateToken = (req, res, next) => {
 // 3. Database Connection (Atlas -> Local -> In-Memory Fallback)
 // ==========================================
 
-const connectDatabase = async () => {
+const connectDatabase = async (): Promise<void> => {
     const configuredUri = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/echochat";
 
     try {
@@ -190,17 +226,17 @@ connectDatabase();
 // ==========================================
 
 // Health check endpoint
-app.get('/', (req, res) => {
+app.get('/', (req: Request, res: Response) => {
     res.json({ 
         status: 'healthy', 
-        name: 'EchoChat API', 
+        name: 'EchoChat TypeScript API', 
         version: '1.0.0', 
         timestamp: new Date() 
     });
 });
 
 // User Registration
-app.post('/register', async (req, res) => {
+app.post('/register', async (req: Request, res: Response) => {
     try {
         const { username, password, displayName } = req.body;
         if (!username || !password) {
@@ -234,7 +270,7 @@ app.post('/register', async (req, res) => {
 });
 
 // User Login
-app.post('/login', async (req, res) => {
+app.post('/login', async (req: Request, res: Response) => {
     try {
         const { username, password } = req.body;
         if (!username || !password) {
@@ -264,7 +300,7 @@ app.post('/login', async (req, res) => {
 });
 
 // Get user contacts / conversation list
-app.get('/my-chats/:userId', authenticateToken, async (req, res) => {
+app.get('/my-chats/:userId', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
     try {
         const users = await User.find({ _id: { $ne: req.params.userId } })
             .select('-password')
@@ -277,7 +313,7 @@ app.get('/my-chats/:userId', authenticateToken, async (req, res) => {
 });
 
 // Get direct messages between two users
-app.get('/messages/:userId/:otherId', authenticateToken, async (req, res) => {
+app.get('/messages/:userId/:otherId', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
     const { userId, otherId } = req.params;
     try {
         const messages = await Message.find({
@@ -295,7 +331,7 @@ app.get('/messages/:userId/:otherId', authenticateToken, async (req, res) => {
 });
 
 // Update profile avatar
-app.post('/update-profile', authenticateToken, async (req, res) => {
+app.post('/update-profile', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
     try {
         const { userId, avatar } = req.body;
         const updatedUser = await User.findByIdAndUpdate(
@@ -321,7 +357,7 @@ app.post('/update-profile', authenticateToken, async (req, res) => {
 });
 
 // Update username
-app.post('/update-username', authenticateToken, async (req, res) => {
+app.post('/update-username', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
     try {
         const { userId, newUsername } = req.body;
         if (!newUsername || newUsername.trim().length < 3) {
@@ -361,13 +397,13 @@ app.post('/update-username', authenticateToken, async (req, res) => {
 // 5. Socket.io Real-Time Signaling & Chat
 // ==========================================
 
-const userSockets = {};  // Map userId -> socket.id
-const lastSeenData = {}; // Map userId -> 'online' | Date
+const userSockets: Record<string, string> = {};  // Map userId -> socket.id
+const lastSeenData: Record<string, string | Date> = {}; // Map userId -> 'online' | Date
 
-io.on('connection', (socket) => {
+io.on('connection', (socket: Socket) => {
 
     // Register active user socket session
-    socket.on('register_socket', (userId) => {
+    socket.on('register_socket', (userId: string) => {
         userSockets[userId] = socket.id;
         lastSeenData[userId] = "online";
         io.emit('user_status_change', { userId, status: "online" });
@@ -379,7 +415,7 @@ io.on('connection', (socket) => {
     });
 
     // Handle private instant messages
-    socket.on('private_message', async (data) => {
+    socket.on('private_message', async (data: any) => {
         try {
             const newMessage = new Message({
                 senderId: data.senderId,
@@ -401,7 +437,7 @@ io.on('connection', (socket) => {
     });
 
     // WebRTC / Agora RTC Call Invitations
-    socket.on('make_call', (data) => {
+    socket.on('make_call', (data: { receiverId: string; callerId: string; callerName: string; channelName: string }) => {
         const receiverSocketId = userSockets[data.receiverId];
         if (receiverSocketId) {
             io.to(receiverSocketId).emit('incoming_call', {
@@ -416,7 +452,7 @@ io.on('connection', (socket) => {
     });
 
     // Call Acceptance
-    socket.on('accept_call', (data) => {
+    socket.on('accept_call', (data: { callerId: string; channelName: string }) => {
         const callerSocketId = userSockets[data.callerId];
         if (callerSocketId) {
             io.to(callerSocketId).emit('call_accepted', { channelName: data.channelName });
@@ -424,7 +460,7 @@ io.on('connection', (socket) => {
     });
 
     // Call Termination / Rejection
-    socket.on('end_call', (data) => {
+    socket.on('end_call', (data: { receiverId: string }) => {
         const receiverSocketId = userSockets[data.receiverId];
         if (receiverSocketId) {
             io.to(receiverSocketId).emit('call_ended');
@@ -443,6 +479,6 @@ io.on('connection', (socket) => {
     });
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 EchoChat Server running on port ${PORT}`);
+server.listen(PORT, () => {
+    console.log(`🚀 EchoChat TypeScript Server running on port ${PORT}`);
 });

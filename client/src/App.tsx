@@ -1,12 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
 import io from 'socket.io-client';
-import AgoraRTC from "agora-rtc-sdk-ng";
+import AgoraRTC, { ICameraVideoTrack, IMicrophoneAudioTrack } from "agora-rtc-sdk-ng";
 import EmojiPicker from 'emoji-picker-react';
 import { 
-  Phone, Video, Send, Paperclip, Smile, User, Moon, Sun, 
-  X, LogOut, PhoneOff, Camera, Settings, Mic, Volume2, Palette, Check, MessageSquare, Clock, FileText,
+  Phone, Video, Send, Paperclip, Smile, User, 
+  X, LogOut, PhoneOff, Camera, Settings, Mic, Palette, Check, MessageSquare, FileText,
   Maximize2, Download, ArrowLeft
 } from 'lucide-react';
+import { IUser, IMessage, ITheme, IIncomingCall, IZoomedImage, AuthMode } from './types/chat.ts';
 
 // Socket connection and Agora configuration
 const socket = io('http://localhost:3000');
@@ -14,7 +15,7 @@ const AGORA_APP_ID = "7d833f08030d4926a9f8693377e64ba8";
 const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
 
 // 10 Diverse Themes Definition
-const themes = [
+const themes: ITheme[] = [
   { id: 'wa-dark', name: 'WhatsApp Dark', primary: '#00a884', bg: '#0b141a', chatBg: '#0b141a', sidebar: '#111b21', header: '#202c33', bubble: '#056162', text: '#ffffff' },
   { id: 'wa-light', name: 'WhatsApp Light', primary: '#00a884', bg: '#e5ddd5', chatBg: '#e5ddd5', sidebar: '#ffffff', header: '#f0f2f5', bubble: '#dcf8c6', text: '#000000' },
   { id: 'ocean-dark', name: 'Ocean Dark', primary: '#0077b6', bg: '#001219', chatBg: '#001219', sidebar: '#001d29', header: '#002533', bubble: '#005f73', text: '#ffffff' },
@@ -27,44 +28,44 @@ const themes = [
   { id: 'minimal-gray', name: 'Minimal Gray', primary: '#495057', bg: '#f8f9fa', chatBg: '#f8f9fa', sidebar: '#e9ecef', header: '#dee2e6', bubble: '#adb5bd', text: '#212529' }
 ];
 
-export default function App() {
-  const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem('chat_token') || '');
-  const [authMode, setAuthMode] = useState('login');
+export default function App(): React.JSX.Element {
+  const [user, setUser] = useState<IUser | null>(null);
+  const [token, setToken] = useState<string>(localStorage.getItem('chat_token') || '');
+  const [authMode, setAuthMode] = useState<AuthMode>('login');
   const [formData, setFormData] = useState({ username: '', password: '', displayName: '' });
-  const [authError, setAuthError] = useState('');
-  const [chats, setChats] = useState([]);
-  const [activeChat, setActiveChat] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [newMessage, setNewMessage] = useState("");
-  const [currentTheme, setCurrentTheme] = useState(themes[0]);
-  const [showSettings, setShowSettings] = useState(false);
-  const [showEmoji, setShowEmoji] = useState(false);
-  const [onlineUsers, setOnlineUsers] = useState({}); 
+  const [authError, setAuthError] = useState<string>('');
+  const [chats, setChats] = useState<IUser[]>([]);
+  const [activeChat, setActiveChat] = useState<IUser | null>(null);
+  const [messages, setMessages] = useState<IMessage[]>([]);
+  const [newMessage, setNewMessage] = useState<string>("");
+  const [currentTheme, setCurrentTheme] = useState<ITheme>(themes[0]);
+  const [showSettings, setShowSettings] = useState<boolean>(false);
+  const [showEmoji, setShowEmoji] = useState<boolean>(false);
+  const [onlineUsers, setOnlineUsers] = useState<Record<string, string | Date>>({}); 
   
-  const [inCall, setInCall] = useState(false);
-  const [localTracks, setLocalTracks] = useState([]);
-  const [incomingCall, setIncomingCall] = useState(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const [zoomedAvatar, setZoomedAvatar] = useState(null);
-  const [zoomedImage, setZoomedImage] = useState(null);
-  const [recordingTime, setRecordingTime] = useState(0);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [editingUsername, setEditingUsername] = useState(false);
-  const [newUsername, setNewUsername] = useState("");
+  const [inCall, setInCall] = useState<boolean>(false);
+  const [localTracks, setLocalTracks] = useState<(IMicrophoneAudioTrack | ICameraVideoTrack)[]>([]);
+  const [incomingCall, setIncomingCall] = useState<IIncomingCall | null>(null);
+  const [isRecording, setIsRecording] = useState<boolean>(false);
+  const [zoomedAvatar, setZoomedAvatar] = useState<string | null>(null);
+  const [zoomedImage, setZoomedImage] = useState<IZoomedImage | null>(null);
+  const [recordingTime, setRecordingTime] = useState<number>(0);
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [editingUsername, setEditingUsername] = useState<boolean>(false);
+  const [newUsername, setNewUsername] = useState<string>("");
 
-  const activeChatRef = useRef(null);
+  const activeChatRef = useRef<IUser | null>(null);
   useEffect(() => { activeChatRef.current = activeChat; }, [activeChat]);
 
-  const scrollRef = useRef();
-  const fileInputRef = useRef();
-  const profileInputRef = useRef();
-  const localVideoRef = useRef();
-  const remoteVideoRef = useRef();
-  const ringtoneRef = useRef(new Audio("https://assets.mixkit.co/active_storage/sfx/1358/1358-preview.mp3"));
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const recordingTimerRef = useRef(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const profileInputRef = useRef<HTMLInputElement>(null);
+  const localVideoRef = useRef<HTMLDivElement>(null);
+  const remoteVideoRef = useRef<HTMLDivElement>(null);
+  const ringtoneRef = useRef<HTMLAudioElement>(new Audio("https://assets.mixkit.co/active_storage/sfx/1358/1358-preview.mp3"));
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<number | null>(null);
 
   // Initial load from LocalStorage
   useEffect(() => {
@@ -80,7 +81,7 @@ export default function App() {
 
   // Keyboard shortcut for closing modals (Escape key)
   useEffect(() => {
-    const handleKeyDown = (e) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setZoomedImage(null);
         setZoomedAvatar(null);
@@ -98,56 +99,61 @@ export default function App() {
       socket.emit('register_socket', user._id);
       socket.emit('get_all_statuses');
       fetchChats();
-      socket.on('all_statuses', (data) => setOnlineUsers(data));
-      socket.on('user_status_change', (data) => setOnlineUsers(prev => ({ ...prev, [data.userId]: data.status })));
-      socket.on('receive_message', (data) => {
-        fetchChats(); // Refresh contacts list to ensure new users appear
+      socket.on('all_statuses', (data: Record<string, string | Date>) => setOnlineUsers(data));
+      socket.on('user_status_change', (data: { userId: string; status: string | Date }) => 
+        setOnlineUsers(prev => ({ ...prev, [data.userId]: data.status }))
+      );
+      socket.on('receive_message', (data: IMessage) => {
+        fetchChats(); // Refresh contacts list
         const currentActive = activeChatRef.current;
         if (currentActive && (data.senderId === currentActive._id || data.receiverId === currentActive._id)) {
-          setMessages(prev => {
-            // Strong duplicate check
-            const exists = prev.some(m => {
-              if (m._id && data._id && m._id === data._id) return true;
-              if (m.content === data.content) {
-                const t1 = new Date(m.timestamp).getTime();
-                const t2 = new Date(data.timestamp).getTime();
-                if (!isNaN(t1) && !isNaN(t2) && Math.abs(t1 - t2) < 5000) return true;
-              }
-              return false;
-            });
-            if (exists) return prev;
-            return [...prev, data];
-          });
+          setMessages(prev => [...prev, data]);
         }
       });
-      socket.on('profile_updated', (data) => {
-        setChats(prev => prev.map(c => c._id === data.userId ? { ...c, avatar: data.avatar } : c));
-        setActiveChat(current => current?._id === data.userId ? { ...current, avatar: data.avatar } : current);
+      socket.on('profile_updated', (data: { userId: string; avatar?: string; username?: string }) => {
+        setChats(prev => prev.map(c => c._id === data.userId ? { ...c, ...data } : c));
+        if (activeChatRef.current?._id === data.userId) {
+          setActiveChat(prev => prev ? { ...prev, ...data } : null);
+        }
       });
-      socket.on('incoming_call', (data) => { 
-        setIncomingCall(data); 
-        ringtoneRef.current.play().catch(() => {}); 
+      socket.on('incoming_call', (data: IIncomingCall) => {
+        setIncomingCall(data);
+        ringtoneRef.current.play().catch(() => {});
       });
-      socket.on('call_accepted', async (data) => await joinRoom(data.channelName));
-      socket.on('call_ended', () => closeCallLocal());
+      socket.on('call_accepted', (data: { channelName: string }) => {
+        joinRoom(data.channelName);
+      });
+      socket.on('call_ended', () => {
+        closeCallLocal();
+      });
+      socket.on('call_rejected', (data: { reason?: string }) => {
+        alert(data.reason || "Call was rejected");
+        closeCallLocal();
+      });
     }
     return () => {
-      socket.off('all_statuses'); socket.off('user_status_change'); socket.off('receive_message');
-      socket.off('profile_updated'); socket.off('incoming_call'); socket.off('call_accepted'); socket.off('call_ended');
+      socket.off('all_statuses');
+      socket.off('user_status_change');
+      socket.off('receive_message');
+      socket.off('profile_updated');
+      socket.off('incoming_call');
+      socket.off('call_accepted');
+      socket.off('call_ended');
+      socket.off('call_rejected');
     };
   }, [user]);
 
-  // Handle active chat changes
+  // Load chat messages when activeChat changes
   useEffect(() => { 
     if (activeChat && user) fetchMessages(activeChat._id); 
     else setMessages([]);
   }, [activeChat]);
 
-  // Auto-scroll to bottom
+  // Auto-scroll to bottom on new messages
   useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
-  const getAuthHeaders = () => {
-    const headers = { 'Content-Type': 'application/json' };
+  const getAuthHeaders = (): Record<string, string> => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     const currentToken = token || localStorage.getItem('chat_token');
     if (currentToken) {
       headers['Authorization'] = `Bearer ${currentToken}`;
@@ -174,7 +180,7 @@ export default function App() {
         return;
       }
       if (res.ok) {
-        const data = await res.json();
+        const data: IUser[] = await res.json();
         setChats(data);
       }
     } catch (err) {
@@ -182,7 +188,7 @@ export default function App() {
     }
   };
 
-  const fetchMessages = async (otherId) => {
+  const fetchMessages = async (otherId: string) => {
     if (!user) return;
     try {
       const res = await fetch(`http://localhost:3000/messages/${user._id}/${otherId}`, {
@@ -193,13 +199,13 @@ export default function App() {
         return;
       }
       if (res.ok) {
-        const data = await res.json();
+        const data: IMessage[] = await res.json();
         setMessages(data);
       }
     } catch (err) { console.error("Error fetching history:", err); }
   };
 
-  const handleAuth = async (e) => {
+  const handleAuth = async (e: FormEvent) => {
     e.preventDefault();
     setAuthError('');
     try {
@@ -222,9 +228,9 @@ export default function App() {
     }
   };
 
-  const handleProfileUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+  const handleProfileUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
     const reader = new FileReader();
     reader.onloadend = async () => {
       try {
@@ -234,7 +240,7 @@ export default function App() {
           body: JSON.stringify({ userId: user._id, avatar: reader.result })
         });
         if (res.ok) {
-          const updatedUser = await res.json();
+          const updatedUser: IUser = await res.json();
           setUser(updatedUser);
           localStorage.setItem('chat_user', JSON.stringify(updatedUser));
         }
@@ -246,7 +252,7 @@ export default function App() {
   };
 
   const handleUsernameUpdate = async () => {
-    if (!newUsername.trim() || newUsername === user.username) {
+    if (!user || !newUsername.trim() || newUsername === user.username) {
       setEditingUsername(false);
       return;
     }
@@ -257,7 +263,7 @@ export default function App() {
         body: JSON.stringify({ userId: user._id, newUsername })
       });
       if (res.ok) {
-        const updatedUser = await res.json();
+        const updatedUser: IUser = await res.json();
         setUser(updatedUser);
         localStorage.setItem('chat_user', JSON.stringify(updatedUser));
         setEditingUsername(false);
@@ -270,76 +276,55 @@ export default function App() {
     }
   };
 
-  const renderAvatar = (u, size = "w-10 h-10", showBadge = false) => {
-    const isOnline = onlineUsers[u?._id] === "online";
+  const renderAvatar = (u: IUser | { displayName?: string; avatar?: string } | null, size = "w-10 h-10", showBadge = false) => {
+    const isOnline = u && '_id' in u && onlineUsers[u._id] === "online";
     return (
-      <div 
-        className={`relative flex-shrink-0 ${u?.avatar ? 'cursor-pointer hover:opacity-90 transition-opacity' : ''}`}
-        onClick={() => { if (u?.avatar) setZoomedAvatar(u.avatar); }}
-      >
-        {u?.avatar ? (
-          <img src={u.avatar} alt="p" className={`${size} rounded-full object-cover`} />
-        ) : (
-          <div className={`${size} bg-[#00a884] rounded-full flex items-center justify-center text-white font-bold uppercase`}>
-            {u?.displayName?.[0] || '?'}
-          </div>
-        )}
-        {showBadge && isOnline && (
-          <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></div>
+      <div className="relative inline-block select-none">
+        <div 
+          className={`${size} rounded-full overflow-hidden flex items-center justify-center font-bold text-white shadow-md bg-gradient-to-tr from-[#00d4aa] to-[#0088ff] ${u?.avatar ? 'cursor-pointer hover:opacity-90 transition-opacity' : ''}`}
+          onClick={() => { if (u?.avatar) setZoomedAvatar(u.avatar); }}
+        >
+          {u?.avatar ? (
+            <img src={u.avatar} alt="Avatar" className="w-full h-full object-cover"/>
+          ) : (
+            <span>{u?.displayName ? u.displayName.charAt(0).toUpperCase() : 'U'}</span>
+          )}
+        </div>
+        {showBadge && (
+          <span 
+            className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#111b21] ${isOnline ? 'bg-[#00d4aa]' : 'bg-gray-500'}`}
+          />
         )}
       </div>
     );
   };
 
-  const sendMessage = (e) => {
-    if (e) e.preventDefault();
-    if (!newMessage.trim() || !activeChat) return;
-    const msgData = { 
-      senderId: user._id, 
-      receiverId: activeChat._id, 
-      content: newMessage, 
-      type: 'text', 
-      timestamp: new Date() 
-    };
-    socket.emit('private_message', msgData);
-    setMessages(prev => [...prev, msgData]);
-    setNewMessage("");
-    setShowEmoji(false);
-  };
-
+  // Voice recording handlers
   const startRecording = async () => {
-    if (!activeChat) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorderRef.current = new MediaRecorder(stream);
       audioChunksRef.current = [];
-      mediaRecorder.ondataavailable = e => audioChunksRef.current.push(e.data);
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+      mediaRecorderRef.current.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      mediaRecorderRef.current.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         const reader = new FileReader();
         reader.onloadend = () => {
-          const msgData = {
-            senderId: user._id,
-            receiverId: activeChat._id,
-            content: reader.result,
-            type: 'audio',
-            timestamp: new Date()
-          };
-          socket.emit('private_message', msgData);
-          setMessages(prev => [...prev, msgData]);
+          sendMediaMessage(reader.result as string, 'audio');
         };
-        reader.readAsDataURL(blob);
+        reader.readAsDataURL(audioBlob);
         stream.getTracks().forEach(t => t.stop());
-        clearInterval(recordingTimerRef.current);
-        setRecordingTime(0);
       };
-      mediaRecorder.start();
+      mediaRecorderRef.current.start();
       setIsRecording(true);
       setRecordingTime(0);
-      recordingTimerRef.current = setInterval(() => setRecordingTime(t => t + 1), 1000);
+      recordingTimerRef.current = window.setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
     } catch (err) {
-      alert('Microphone access denied.');
+      alert("Microphone permission denied or device unavailable.");
     }
   };
 
@@ -347,51 +332,94 @@ export default function App() {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
     }
   };
 
-  const handleFileUpload = (e) => {
-    const file = e.target.files[0];
+  const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     if (!file) return;
-    const fileType = file.type.split('/')[0];
+    let type: IMessage['type'] = 'application';
+    if (file.type.startsWith('image/')) type = 'image';
+    else if (file.type.startsWith('video/')) type = 'video';
+    else if (file.type.startsWith('audio/')) type = 'audio';
+
     const reader = new FileReader();
     reader.onloadend = () => {
-      const msgData = { 
-        senderId: user._id, 
-        receiverId: activeChat._id, 
-        content: reader.result, 
-        type: fileType, 
-        fileName: file.name,
-        timestamp: new Date() 
-      };
-      socket.emit('private_message', msgData);
-      setMessages(prev => [...prev, msgData]);
+      sendMediaMessage(reader.result as string, type, file.name);
     };
     reader.readAsDataURL(file);
   };
 
-  const joinRoom = async (channelName) => {
-    try {
-      ringtoneRef.current.pause();
-      await client.join(AGORA_APP_ID, channelName, null, user._id);
-      const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
-      setLocalTracks([audioTrack, videoTrack]);
-      setInCall(true);
-      setTimeout(() => videoTrack.play(localVideoRef.current), 100);
-      await client.publish([audioTrack, videoTrack]);
-      client.on("user-published", async (remoteUser, mediaType) => {
-        await client.subscribe(remoteUser, mediaType);
-        if (mediaType === "video") remoteUser.videoTrack.play(remoteVideoRef.current);
-        if (mediaType === "audio") remoteUser.audioTrack.play();
-      });
-    } catch (err) { console.error(err); }
+  const sendMediaMessage = (content: string, type: IMessage['type'], fileName = '') => {
+    if (!activeChat || !user) return;
+    const msgData: IMessage = {
+      senderId: user._id,
+      receiverId: activeChat._id,
+      content,
+      type,
+      fileName,
+      timestamp: new Date()
+    };
+    socket.emit('private_message', msgData);
+    setMessages(prev => [...prev, msgData]);
   };
 
-  const startCall = () => {
-    if (!activeChat) return;
-    const channelName = `call_${user._id.slice(-5)}_${activeChat._id.slice(-5)}`;
-    socket.emit('make_call', { callerName: user.displayName, callerId: user._id, receiverId: activeChat._id, channelName });
-    joinRoom(channelName);
+  const sendMessage = (e: FormEvent) => {
+    e.preventDefault();
+    if (!newMessage.trim() || !activeChat || !user) return;
+    const msgData: IMessage = {
+      senderId: user._id,
+      receiverId: activeChat._id,
+      content: newMessage,
+      type: 'text',
+      timestamp: new Date()
+    };
+    socket.emit('private_message', msgData);
+    setMessages(prev => [...prev, msgData]);
+    setNewMessage("");
+    setShowEmoji(false);
+  };
+
+  // Video calling handlers
+  const startCall = async () => {
+    if (!activeChat || !user) return;
+    const channelName = `call_${user._id}_${activeChat._id}_${Date.now()}`;
+    socket.emit('make_call', {
+      receiverId: activeChat._id,
+      callerId: user._id,
+      callerName: user.displayName,
+      channelName
+    });
+    await joinRoom(channelName);
+  };
+
+  const joinRoom = async (channelName: string) => {
+    if (!user) return;
+    try {
+      setInCall(true);
+      ringtoneRef.current.pause();
+      await client.join(AGORA_APP_ID, channelName, null, user._id);
+      
+      const audioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+      const videoTrack = await AgoraRTC.createCameraVideoTrack();
+      
+      setLocalTracks([audioTrack, videoTrack]);
+      if (localVideoRef.current) videoTrack.play(localVideoRef.current);
+      await client.publish([audioTrack, videoTrack]);
+
+      client.on("user-published", async (remoteUser, mediaType) => {
+        await client.subscribe(remoteUser, mediaType);
+        if (mediaType === "video" && remoteVideoRef.current) {
+          remoteUser.videoTrack?.play(remoteVideoRef.current);
+        }
+        if (mediaType === "audio") {
+          remoteUser.audioTrack?.play();
+        }
+      });
+    } catch (err) {
+      console.error("Agora join room error:", err);
+    }
   };
 
   const closeCallLocal = async () => {
@@ -403,14 +431,12 @@ export default function App() {
     setIncomingCall(null);
   };
 
-  // Helper to detect if a message is emoji-only
-  const isOnlyEmoji = (str) => {
+  const isOnlyEmoji = (str: string) => {
     const emojiRegex = /^(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])+$/g;
     return emojiRegex.test(str.replace(/\s/g, ''));
   };
 
-  // Render content based on message type
-  const renderMessageContent = (m) => {
+  const renderMessageContent = (m: IMessage) => {
     switch (m.type) {
       case 'image': 
         return (
@@ -436,10 +462,10 @@ export default function App() {
       case 'video': 
         return <video controls className="rounded-xl w-full max-w-[280px] sm:max-w-[320px] max-h-[240px] bg-black shadow-lg my-1"><source src={m.content} /></video>;
       case 'audio': 
-        return <audio controls className="h-10 w-full min-w-[250px]"><source src={m.content} /></audio>;
+        return <audio controls className="h-10 w-full min-w-[200px]"><source src={m.content} /></audio>;
       case 'application': 
         return (
-          <a href={m.content} download={m.fileName} className="flex items-center gap-3 p-3 bg-black/10 rounded-lg hover:bg-black/20 transition-all">
+          <a href={m.content} download={m.fileName || 'Attachment'} className="flex items-center gap-3 p-3 bg-black/10 rounded-lg hover:bg-black/20 transition-all">
             <FileText size={30} className="text-white/60"/> 
             <span className="text-sm font-medium truncate max-w-[200px]">{m.fileName || 'Attachment'}</span>
           </a>
@@ -457,13 +483,11 @@ export default function App() {
   // Login/Register Screen
   if (!user) return (
     <div className="auth-screen">
-      {/* Animated background orbs */}
       <div className="orb orb-1" />
       <div className="orb orb-2" />
       <div className="orb orb-3" />
       <div className="orb orb-4" />
 
-      {/* Floating particles */}
       {[...Array(20)].map((_, i) => (
         <div key={i} className="particle" style={{
           left: `${Math.random() * 100}%`,
@@ -476,46 +500,30 @@ export default function App() {
       ))}
 
       <div className="auth-card">
-        {/* Logo area */}
         <div className="auth-logo">
           <div className="auth-logo-icon">
-            <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" className="auth-logo-svg">
-              <circle cx="24" cy="24" r="22" fill="url(#logoGrad)" />
-              <path d="M24 12C17.373 12 12 17.373 12 24C12 26.4 12.672 28.644 13.836 30.552L12 36L17.676 34.2C19.512 35.268 21.684 35.904 24 35.904C30.627 35.904 36 30.531 36 23.904C36 17.277 30.627 12 24 12Z" fill="white" opacity="0.9"/>
-              <path d="M19 22.5C19 22.5 20.5 21 22 21C23.5 21 24.5 22.5 24.5 22.5C24.5 22.5 25.5 24 27 24C28.5 24 29.5 22.5 29.5 22.5" stroke="url(#logoGrad)" strokeWidth="2" strokeLinecap="round"/>
-              <defs>
-                <linearGradient id="logoGrad" x1="0" y1="0" x2="48" y2="48">
-                  <stop offset="0%" stopColor="#00d4aa"/>
-                  <stop offset="100%" stopColor="#0088ff"/>
-                </linearGradient>
-              </defs>
+            <svg viewBox="0 0 24 24" fill="none" style={{width:28,height:28}}>
+              <circle cx="12" cy="12" r="10" fill="url(#brandGrad)"/>
+              <path d="M8 12c0 0 1 1.5 2 1.5S12 12 12 12s1 1.5 2 1.5 2-1.5 2-1.5" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+              <defs><linearGradient id="brandGrad" x1="0" y1="0" x2="24" y2="24"><stop stopColor="#00d4aa"/><stop offset="1" stopColor="#0088ff"/></linearGradient></defs>
             </svg>
           </div>
-          <h1 className="auth-app-name">EchoChat</h1>
-          <p className="auth-tagline">Connect. Chat. Echo.</p>
+          <h1 className="auth-title">EchoChat</h1>
+          <p className="auth-sub">Next-generation real-time communication</p>
         </div>
 
-        {/* Mode tabs */}
         <div className="auth-tabs">
-          <button
-            className={`auth-tab ${authMode === 'login' ? 'active' : ''}`}
-            onClick={() => setAuthMode('login')}
-          >Sign In</button>
-          <button
-            className={`auth-tab ${authMode === 'register' ? 'active' : ''}`}
-            onClick={() => setAuthMode('register')}
-          >Sign Up</button>
+          <button className={`auth-tab ${authMode === 'login' ? 'active' : ''}`} onClick={() => setAuthMode('login')}>Sign In</button>
+          <button className={`auth-tab ${authMode === 'register' ? 'active' : ''}`} onClick={() => setAuthMode('register')}>Sign Up</button>
           <div className="auth-tab-slider" style={{ transform: authMode === 'login' ? 'translateX(0)' : 'translateX(100%)' }} />
         </div>
 
-        {/* Error Alert */}
         {authError && (
           <div className="text-red-400 text-xs bg-red-500/10 border border-red-500/20 p-2.5 rounded-xl mb-4 text-center font-medium animate-fade-in">
             {authError}
           </div>
         )}
 
-        {/* Form */}
         <form onSubmit={handleAuth} className="auth-form">
           {authMode === 'register' && (
             <div className="auth-field" style={{ animation: 'slideDown 0.3s ease' }}>
@@ -590,7 +598,6 @@ export default function App() {
           className="fixed inset-0 bg-black/90 z-[950] flex flex-col items-center justify-center p-4 sm:p-8 backdrop-blur-md animate-fade-in"
           onClick={() => setZoomedImage(null)}
         >
-          {/* Top Bar with actions */}
           <div className="absolute top-5 right-5 flex items-center gap-2.5 z-10" onClick={(e) => e.stopPropagation()}>
             <a
               href={zoomedImage.url}
@@ -610,7 +617,6 @@ export default function App() {
             </button>
           </div>
 
-          {/* Centered Full-size Image */}
           <div className="relative max-w-[95vw] max-h-[85vh] flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
             <img 
               src={zoomedImage.url} 
@@ -631,7 +637,7 @@ export default function App() {
                     <h3 className="text-xl font-bold mb-4 sm:mb-6 flex items-center justify-center gap-2"><User size={18}/> Profile</h3>
                     <div className="relative w-28 h-28 sm:w-32 sm:h-32 mx-auto mb-4 group">
                         {renderAvatar(user, "w-full h-full text-4xl")}
-                        <button onClick={() => profileInputRef.current.click()} className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all"><Camera/></button>
+                        <button onClick={() => profileInputRef.current?.click()} className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all"><Camera/></button>
                         <input type="file" ref={profileInputRef} className="hidden" accept="image/*" onChange={handleProfileUpload} />
                     </div>
                     <p className="font-bold text-lg">{user.displayName}</p>
@@ -655,9 +661,9 @@ export default function App() {
                     )}
                     <button onClick={handleLogout} className="settings-logout-btn"><LogOut size={16}/> Logout</button>
                 </div>
-                <div className="flex-1 pl-4 flex flex-col overflow-hidden">
-                    <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><Palette size={18}/> Themes</h3>
-                    <div className="grid grid-cols-2 gap-3 overflow-y-auto pr-2 custom-scrollbar" style={{maxHeight:'300px'}}>
+                <div className="flex-1 pl-0 md:pl-4 flex flex-col overflow-hidden">
+                    <h3 className="text-xl font-bold mb-4 sm:mb-6 flex items-center gap-2"><Palette size={18}/> Themes</h3>
+                    <div className="grid grid-cols-2 gap-2.5 overflow-y-auto pr-2 custom-scrollbar" style={{maxHeight:'300px'}}>
                         {themes.map(t => (
                             <div key={t.id} onClick={() => { setCurrentTheme(t); localStorage.setItem('app_theme', t.id); }} className={`theme-card ${currentTheme.id === t.id ? 'active' : ''}`} style={{ backgroundColor: t.header }}>
                                 <div className="theme-dots">
@@ -775,7 +781,6 @@ export default function App() {
             {/* Chat Header */}
             <div className="chat-header" style={{ backgroundColor: currentTheme.header }}>
               <div className="chat-header-left">
-                {/* Back button on mobile */}
                 <button 
                   onClick={() => setActiveChat(null)} 
                   className="md:hidden p-1.5 -ml-1 mr-1 rounded-full hover:bg-white/10 text-white/80 transition-colors flex items-center justify-center cursor-pointer"
@@ -837,12 +842,11 @@ export default function App() {
             <div className="chat-input-bar" style={{ backgroundColor: currentTheme.header }}>
               {showEmoji && (
                 <div className="chat-emoji-picker">
-                  <EmojiPicker onEmojiClick={(e) => setNewMessage(p => p + e.emoji)} theme="dark"/>
+                  <EmojiPicker onEmojiClick={(e) => setNewMessage(p => p + e.emoji)} theme="dark" />
                 </div>
               )}
 
               {isRecording ? (
-                /* Recording mode */
                 <div className="chat-recording-bar">
                   <div className="chat-recording-dot"/>
                   <span className="chat-recording-label">Recording…</span>
@@ -857,11 +861,10 @@ export default function App() {
                   </button>
                 </div>
               ) : (
-                /* Normal mode */
                 <>
                   <button className="chat-icon-btn emoji-toggle" onClick={() => setShowEmoji(!showEmoji)}><Smile size={22}/></button>
                   <input type="file" ref={fileInputRef} className="hidden" accept="image/*,video/*,audio/*,.pdf" onChange={handleFileUpload}/>
-                  <button className="chat-icon-btn" onClick={() => fileInputRef.current.click()}><Paperclip size={20}/></button>
+                  <button className="chat-icon-btn" onClick={() => fileInputRef.current?.click()}><Paperclip size={20}/></button>
                   <form onSubmit={sendMessage} className="chat-input-form">
                     <input
                       value={newMessage}
