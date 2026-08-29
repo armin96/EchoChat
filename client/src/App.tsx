@@ -10,7 +10,8 @@ import {
 import { IUser, IMessage, ITheme, IIncomingCall, IZoomedImage, AuthMode } from './types/chat.ts';
 
 // Socket connection and Agora configuration
-const socket = io('http://localhost:3000');
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const socket = io(API_URL);
 const AGORA_APP_ID = "7d833f08030d4926a9f8693377e64ba8"; 
 const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
 
@@ -172,7 +173,7 @@ export default function App(): React.JSX.Element {
   const fetchChats = async () => {
     if (!user) return;
     try {
-      const res = await fetch(`http://localhost:3000/my-chats/${user._id}`, {
+      const res = await fetch(`${API_URL}/my-chats/${user._id}`, {
         headers: getAuthHeaders()
       });
       if (res.status === 401 || res.status === 403) {
@@ -191,7 +192,7 @@ export default function App(): React.JSX.Element {
   const fetchMessages = async (otherId: string) => {
     if (!user) return;
     try {
-      const res = await fetch(`http://localhost:3000/messages/${user._id}/${otherId}`, {
+      const res = await fetch(`${API_URL}/messages/${user._id}/${otherId}`, {
         headers: getAuthHeaders()
       });
       if (res.status === 401 || res.status === 403) {
@@ -209,7 +210,7 @@ export default function App(): React.JSX.Element {
     e.preventDefault();
     setAuthError('');
     try {
-      const res = await fetch(`http://localhost:3000/${authMode}`, {
+      const res = await fetch(`${API_URL}/${authMode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
@@ -234,7 +235,7 @@ export default function App(): React.JSX.Element {
     const reader = new FileReader();
     reader.onloadend = async () => {
       try {
-        const res = await fetch('http://localhost:3000/update-profile', {
+        const res = await fetch(`${API_URL}/update-profile`, {
           method: 'POST',
           headers: getAuthHeaders(),
           body: JSON.stringify({ userId: user._id, avatar: reader.result })
@@ -257,7 +258,7 @@ export default function App(): React.JSX.Element {
       return;
     }
     try {
-      const res = await fetch('http://localhost:3000/update-username', {
+      const res = await fetch(`${API_URL}/update-username`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({ userId: user._id, newUsername })
