@@ -4,7 +4,8 @@ import AgoraRTC from "agora-rtc-sdk-ng";
 import EmojiPicker from 'emoji-picker-react';
 import { 
   Phone, Video, Send, Paperclip, Smile, User, Moon, Sun, 
-  X, LogOut, PhoneOff, Camera, Settings, Mic, Volume2, Palette, Check, MessageSquare, Clock, FileText
+  X, LogOut, PhoneOff, Camera, Settings, Mic, Volume2, Palette, Check, MessageSquare, Clock, FileText,
+  Maximize2, Download, ArrowLeft
 } from 'lucide-react';
 
 // Socket connection and Agora configuration
@@ -28,8 +29,10 @@ const themes = [
 
 export default function App() {
   const [user, setUser] = useState(null);
+  const [token, setToken] = useState(localStorage.getItem('chat_token') || '');
   const [authMode, setAuthMode] = useState('login');
   const [formData, setFormData] = useState({ username: '', password: '', displayName: '' });
+  const [authError, setAuthError] = useState('');
   const [chats, setChats] = useState([]);
   const [activeChat, setActiveChat] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -44,6 +47,7 @@ export default function App() {
   const [incomingCall, setIncomingCall] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
   const [zoomedAvatar, setZoomedAvatar] = useState(null);
+  const [zoomedImage, setZoomedImage] = useState(null);
   const [recordingTime, setRecordingTime] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [editingUsername, setEditingUsername] = useState(false);
@@ -65,9 +69,27 @@ export default function App() {
   // Initial load from LocalStorage
   useEffect(() => {
     const savedUser = localStorage.getItem('chat_user');
-    if (savedUser) setUser(JSON.parse(savedUser));
+    const savedToken = localStorage.getItem('chat_token');
+    if (savedUser && savedToken) {
+      setUser(JSON.parse(savedUser));
+      setToken(savedToken);
+    }
     const savedThemeId = localStorage.getItem('app_theme');
     if (savedThemeId) setCurrentTheme(themes.find(t => t.id === savedThemeId) || themes[0]);
+  }, []);
+
+  // Keyboard shortcut for closing modals (Escape key)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setZoomedImage(null);
+        setZoomedAvatar(null);
+        setShowSettings(false);
+        setShowEmoji(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   // Socket event listeners
@@ -124,33 +146,79 @@ export default function App() {
   // Auto-scroll to bottom
   useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
+  const getAuthHeaders = () => {
+    const headers = { 'Content-Type': 'application/json' };
+    const currentToken = token || localStorage.getItem('chat_token');
+    if (currentToken) {
+      headers['Authorization'] = `Bearer ${currentToken}`;
+    }
+    return headers;
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('chat_user');
+    localStorage.removeItem('chat_token');
+    setUser(null);
+    setToken('');
+    setActiveChat(null);
+  };
+
   const fetchChats = async () => {
-    const res = await fetch(`http://localhost:3000/my-chats/${user._id}`);
-    const data = await res.json();
-    setChats(data);
+    if (!user) return;
+    try {
+      const res = await fetch(`http://localhost:3000/my-chats/${user._id}`, {
+        headers: getAuthHeaders()
+      });
+      if (res.status === 401 || res.status === 403) {
+        handleLogout();
+        return;
+      }
+      if (res.ok) {
+        const data = await res.json();
+        setChats(data);
+      }
+    } catch (err) {
+      console.error("Error fetching chats:", err);
+    }
   };
 
   const fetchMessages = async (otherId) => {
+    if (!user) return;
     try {
-      const res = await fetch(`http://localhost:3000/messages/${user._id}/${otherId}`);
+      const res = await fetch(`http://localhost:3000/messages/${user._id}/${otherId}`, {
+        headers: getAuthHeaders()
+      });
+      if (res.status === 401 || res.status === 403) {
+        handleLogout();
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         setMessages(data);
       }
-    } catch (err) { console.error("Error fetching history", err); }
+    } catch (err) { console.error("Error fetching history:", err); }
   };
 
   const handleAuth = async (e) => {
     e.preventDefault();
-    const res = await fetch(`http://localhost:3000/${authMode}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(formData)
-    });
-    if (res.ok) {
-      const userData = await res.json();
-      setUser(userData);
-      localStorage.setItem('chat_user', JSON.stringify(userData));
+    setAuthError('');
+    try {
+      const res = await fetch(`http://localhost:3000/${authMode}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData)
+      });
+      const data = await res.json();
+      if (res.ok && data.token && data.user) {
+        setToken(data.token);
+        setUser(data.user);
+        localStorage.setItem('chat_token', data.token);
+        localStorage.setItem('chat_user', JSON.stringify(data.user));
+      } else {
+        setAuthError(data.error || 'Authentication failed. Please check your credentials.');
+      }
+    } catch (err) {
+      setAuthError('Connection error. Please make sure the server is running.');
     }
   };
 
@@ -159,15 +227,19 @@ export default function App() {
     if (!file) return;
     const reader = new FileReader();
     reader.onloadend = async () => {
-      const res = await fetch('http://localhost:3000/update-profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user._id, avatar: reader.result })
-      });
-      if (res.ok) {
-        const updatedUser = await res.json();
-        setUser(updatedUser);
-        localStorage.setItem('chat_user', JSON.stringify(updatedUser));
+      try {
+        const res = await fetch('http://localhost:3000/update-profile', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ userId: user._id, avatar: reader.result })
+        });
+        if (res.ok) {
+          const updatedUser = await res.json();
+          setUser(updatedUser);
+          localStorage.setItem('chat_user', JSON.stringify(updatedUser));
+        }
+      } catch (err) {
+        console.error("Profile update error:", err);
       }
     };
     reader.readAsDataURL(file);
@@ -178,19 +250,23 @@ export default function App() {
       setEditingUsername(false);
       return;
     }
-    const res = await fetch('http://localhost:3000/update-username', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: user._id, newUsername })
-    });
-    if (res.ok) {
-      const updatedUser = await res.json();
-      setUser(updatedUser);
-      localStorage.setItem('chat_user', JSON.stringify(updatedUser));
-      setEditingUsername(false);
-    } else {
-      const errorData = await res.json();
-      alert(errorData.error || "Failed to update username");
+    try {
+      const res = await fetch('http://localhost:3000/update-username', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ userId: user._id, newUsername })
+      });
+      if (res.ok) {
+        const updatedUser = await res.json();
+        setUser(updatedUser);
+        localStorage.setItem('chat_user', JSON.stringify(updatedUser));
+        setEditingUsername(false);
+      } else {
+        const errorData = await res.json();
+        alert(errorData.error || "Failed to update username");
+      }
+    } catch (err) {
+      alert("Failed to update username due to connection error.");
     }
   };
 
@@ -337,9 +413,28 @@ export default function App() {
   const renderMessageContent = (m) => {
     switch (m.type) {
       case 'image': 
-        return <img src={m.content} className="rounded-lg w-full max-w-[500px] object-contain shadow-sm border border-black/10" alt="Sent Image" />;
+        return (
+          <div 
+            className="relative group cursor-pointer overflow-hidden rounded-xl my-1 inline-block select-none"
+            onClick={() => setZoomedImage({ url: m.content, timestamp: m.timestamp })}
+            title="Click to view full size"
+          >
+            <img 
+              src={m.content} 
+              className="rounded-xl w-auto max-w-[240px] sm:max-w-[280px] max-h-[220px] object-cover shadow-sm border border-black/10 transition-transform duration-300 group-hover:scale-[1.03]" 
+              alt="Sent Image" 
+              loading="lazy"
+            />
+            <div className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition-all duration-200 rounded-xl flex items-center justify-center">
+              <span className="bg-black/70 backdrop-blur-md text-white text-xs px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-lg border border-white/20 font-medium">
+                <Maximize2 size={13} />
+                <span className="text-[11px]">Full size</span>
+              </span>
+            </div>
+          </div>
+        );
       case 'video': 
-        return <video controls className="rounded-lg w-full max-w-[500px] bg-black shadow-lg"><source src={m.content} /></video>;
+        return <video controls className="rounded-xl w-full max-w-[280px] sm:max-w-[320px] max-h-[240px] bg-black shadow-lg my-1"><source src={m.content} /></video>;
       case 'audio': 
         return <audio controls className="h-10 w-full min-w-[250px]"><source src={m.content} /></audio>;
       case 'application': 
@@ -413,6 +508,13 @@ export default function App() {
           <div className="auth-tab-slider" style={{ transform: authMode === 'login' ? 'translateX(0)' : 'translateX(100%)' }} />
         </div>
 
+        {/* Error Alert */}
+        {authError && (
+          <div className="text-red-400 text-xs bg-red-500/10 border border-red-500/20 p-2.5 rounded-xl mb-4 text-center font-medium animate-fade-in">
+            {authError}
+          </div>
+        )}
+
         {/* Form */}
         <form onSubmit={handleAuth} className="auth-form">
           {authMode === 'register' && (
@@ -475,21 +577,59 @@ export default function App() {
       {/* Zoomed Avatar Overlay */}
       {zoomedAvatar && (
         <div className="fixed inset-0 bg-black/90 z-[900] flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setZoomedAvatar(null)}>
-          <button className="absolute top-6 right-6 text-white/70 hover:text-white transition-colors">
-            <X size={32}/>
+          <button className="absolute top-6 right-6 text-white/70 hover:text-white transition-colors p-2 rounded-full hover:bg-white/10">
+            <X size={28}/>
           </button>
-          <img src={zoomedAvatar} alt="Zoomed" className="max-w-full max-h-full rounded-2xl shadow-2xl object-contain animate-pulse-once" style={{ animation: 'scaleIn 0.3s ease-out forwards' }} onClick={(e) => e.stopPropagation()} />
+          <img src={zoomedAvatar} alt="Zoomed" className="max-w-full max-h-full rounded-2xl shadow-2xl object-contain" style={{ animation: 'scaleIn 0.25s ease-out forwards' }} onClick={(e) => e.stopPropagation()} />
+        </div>
+      )}
+
+      {/* Full-size Image Lightbox */}
+      {zoomedImage && (
+        <div 
+          className="fixed inset-0 bg-black/90 z-[950] flex flex-col items-center justify-center p-4 sm:p-8 backdrop-blur-md animate-fade-in"
+          onClick={() => setZoomedImage(null)}
+        >
+          {/* Top Bar with actions */}
+          <div className="absolute top-5 right-5 flex items-center gap-2.5 z-10" onClick={(e) => e.stopPropagation()}>
+            <a
+              href={zoomedImage.url}
+              download="echochat-image.png"
+              className="px-3.5 py-2 rounded-full bg-white/15 hover:bg-white/25 text-white transition-all backdrop-blur-md border border-white/10 shadow-lg flex items-center gap-1.5 text-xs font-medium"
+              title="Download image"
+            >
+              <Download size={15}/>
+              <span className="hidden sm:inline">Download</span>
+            </a>
+            <button 
+              onClick={() => setZoomedImage(null)}
+              className="p-2 rounded-full bg-white/15 hover:bg-white/25 text-white transition-all backdrop-blur-md border border-white/10 shadow-lg"
+              title="Close (ESC)"
+            >
+              <X size={20}/>
+            </button>
+          </div>
+
+          {/* Centered Full-size Image */}
+          <div className="relative max-w-[95vw] max-h-[85vh] flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+            <img 
+              src={zoomedImage.url} 
+              alt="Full size" 
+              className="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain border border-white/10"
+              style={{ animation: 'scaleIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards' }} 
+            />
+          </div>
         </div>
       )}
 
       {/* Settings Modal */}
       {showSettings && (
-        <div className="fixed inset-0 bg-black/80 z-[600] flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="p-8 rounded-3xl w-full max-w-2xl flex flex-col md:flex-row gap-8 relative shadow-2xl" style={{ backgroundColor: currentTheme.sidebar }}>
+        <div className="fixed inset-0 bg-black/80 z-[600] flex items-center justify-center p-3 sm:p-4 backdrop-blur-sm">
+            <div className="p-5 sm:p-8 rounded-2xl sm:rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-y-auto flex flex-col md:flex-row gap-6 md:gap-8 relative shadow-2xl custom-scrollbar" style={{ backgroundColor: currentTheme.sidebar }}>
                 <button onClick={() => setShowSettings(false)} className="chat-close-btn"><X size={18}/></button>
-                <div className="flex-1 text-center border-r border-white/10 pr-4">
-                    <h3 className="text-xl font-bold mb-6 flex items-center justify-center gap-2"><User size={18}/> Profile</h3>
-                    <div className="relative w-32 h-32 mx-auto mb-4 group">
+                <div className="flex-1 text-center md:border-r border-white/10 md:pr-4 pb-4 md:pb-0 border-b md:border-b-0">
+                    <h3 className="text-xl font-bold mb-4 sm:mb-6 flex items-center justify-center gap-2"><User size={18}/> Profile</h3>
+                    <div className="relative w-28 h-28 sm:w-32 sm:h-32 mx-auto mb-4 group">
                         {renderAvatar(user, "w-full h-full text-4xl")}
                         <button onClick={() => profileInputRef.current.click()} className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all"><Camera/></button>
                         <input type="file" ref={profileInputRef} className="hidden" accept="image/*" onChange={handleProfileUpload} />
@@ -513,7 +653,7 @@ export default function App() {
                         @{user.username} <span className="text-[10px] uppercase bg-white/10 px-2 py-0.5 rounded-full">Edit</span>
                       </p>
                     )}
-                    <button onClick={() => { localStorage.removeItem('chat_user'); setUser(null); }} className="settings-logout-btn"><LogOut size={16}/> Logout</button>
+                    <button onClick={handleLogout} className="settings-logout-btn"><LogOut size={16}/> Logout</button>
                 </div>
                 <div className="flex-1 pl-4 flex flex-col overflow-hidden">
                     <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><Palette size={18}/> Themes</h3>
@@ -553,13 +693,13 @@ export default function App() {
       {inCall && (
         <div className="fixed inset-0 bg-black z-[800] flex items-center justify-center">
             <div ref={remoteVideoRef} className="w-full h-full object-cover"></div>
-            <div ref={localVideoRef} className="absolute top-6 right-6 w-40 h-60 border-2 border-[#00d4aa] rounded-2xl overflow-hidden z-10 shadow-2xl"></div>
-            <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-20"><button onClick={() => { socket.emit('end_call', { receiverId: activeChat?._id }); closeCallLocal(); }} className="call-btn decline"><PhoneOff size={28}/></button></div>
+            <div ref={localVideoRef} className="absolute top-4 right-4 sm:top-6 sm:right-6 w-28 h-40 sm:w-40 sm:h-60 border-2 border-[#00d4aa] rounded-2xl overflow-hidden z-10 shadow-2xl"></div>
+            <div className="absolute bottom-8 sm:bottom-10 left-1/2 -translate-x-1/2 z-20"><button onClick={() => { socket.emit('end_call', { receiverId: activeChat?._id }); closeCallLocal(); }} className="call-btn decline"><PhoneOff size={28}/></button></div>
         </div>
       )}
 
       {/* ═══ SIDEBAR ═══ */}
-      <div className="chat-sidebar" style={{ backgroundColor: currentTheme.sidebar }}>
+      <div className={`chat-sidebar ${activeChat ? 'hidden md:flex' : 'flex'}`} style={{ backgroundColor: currentTheme.sidebar }}>
         {/* Sidebar Header */}
         <div className="chat-sidebar-header" style={{ backgroundColor: currentTheme.header }}>
           <div className="chat-sidebar-brand">
@@ -629,13 +769,23 @@ export default function App() {
       </div>
 
       {/* ═══ MAIN CHAT AREA ═══ */}
-      <div className="chat-main" style={{ backgroundColor: currentTheme.chatBg }}>
+      <div className={`chat-main ${activeChat ? 'flex' : 'hidden md:flex'}`} style={{ backgroundColor: currentTheme.chatBg }}>
         {activeChat ? (
           <>
             {/* Chat Header */}
             <div className="chat-header" style={{ backgroundColor: currentTheme.header }}>
               <div className="chat-header-left">
-                {renderAvatar(activeChat, "w-10 h-10", true)}
+                {/* Back button on mobile */}
+                <button 
+                  onClick={() => setActiveChat(null)} 
+                  className="md:hidden p-1.5 -ml-1 mr-1 rounded-full hover:bg-white/10 text-white/80 transition-colors flex items-center justify-center cursor-pointer"
+                  title="Back to chats"
+                >
+                  <ArrowLeft size={20} />
+                </button>
+                <div onClick={() => { if (activeChat?.avatar) setZoomedAvatar(activeChat.avatar); }} className="cursor-pointer">
+                  {renderAvatar(activeChat, "w-9 h-9 sm:w-10 sm:h-10", true)}
+                </div>
                 <div className="chat-header-info">
                   <div className="chat-header-name" style={{color: currentTheme.text}}>{activeChat.displayName}</div>
                   <div className={`chat-header-status ${onlineUsers[activeChat._id] === "online" ? 'online' : ''}`}>
