@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://echo-chat-topaz.vercel.app/" target="_blank">
+  <a href="https://echo-chat-navy.vercel.app/" target="_blank">
     <img src="https://img.shields.io/badge/🚀_Live_Demo-View_EchoChat-0070F3?style=for-the-badge&logo=vercel&logoColor=white" alt="Live Demo" />
   </a>
 </p>
