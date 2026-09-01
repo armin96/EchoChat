@@ -10,7 +10,7 @@ import {
 import { IUser, IMessage, ITheme, IIncomingCall, IZoomedImage, AuthMode } from './types/chat.ts';
 
 // Socket connection and Agora configuration
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_URL = import.meta.env.VITE_API_URL || 'https://echochat-2794.onrender.com';
 const socket = io(API_URL);
 const AGORA_APP_ID = "7d833f08030d4926a9f8693377e64ba8"; 
 const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
@@ -33,8 +33,9 @@ export default function App(): React.JSX.Element {
   const [user, setUser] = useState<IUser | null>(null);
   const [token, setToken] = useState<string>(localStorage.getItem('chat_token') || '');
   const [authMode, setAuthMode] = useState<AuthMode>('login');
-  const [formData, setFormData] = useState({ username: '', password: '', displayName: '' });
+  const [formData, setFormData] = useState({ username: 'armin', password: '123', displayName: '' });
   const [authError, setAuthError] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [chats, setChats] = useState<IUser[]>([]);
   const [activeChat, setActiveChat] = useState<IUser | null>(null);
   const [messages, setMessages] = useState<IMessage[]>([]);
@@ -206,14 +207,16 @@ export default function App(): React.JSX.Element {
     } catch (err) { console.error("Error fetching history:", err); }
   };
 
-  const handleAuth = async (e: FormEvent) => {
-    e.preventDefault();
+  const handleAuth = async (e?: FormEvent, customData?: { username: string; password: string }) => {
+    if (e) e.preventDefault();
     setAuthError('');
+    setIsSubmitting(true);
+    const dataToSubmit = customData ? { username: customData.username, password: customData.password } : formData;
     try {
-      const res = await fetch(`${API_URL}/${authMode}`, {
+      const res = await fetch(`${API_URL}/${customData ? 'login' : authMode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(dataToSubmit)
       });
       const data = await res.json();
       if (res.ok && data.token && data.user) {
@@ -225,7 +228,9 @@ export default function App(): React.JSX.Element {
         setAuthError(data.error || 'Authentication failed. Please check your credentials.');
       }
     } catch (err) {
-      setAuthError('Connection error. Please make sure the server is running.');
+      setAuthError('Connecting to server... If Render is waking up from idle, please try again in a few seconds.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -535,6 +540,7 @@ export default function App(): React.JSX.Element {
                   type="text"
                   placeholder="Your display name"
                   className="auth-input"
+                  value={formData.displayName}
                   onChange={e => setFormData({...formData, displayName: e.target.value})}
                 />
               </div>
@@ -548,6 +554,7 @@ export default function App(): React.JSX.Element {
                 type="text"
                 placeholder="Enter your username"
                 className="auth-input"
+                value={formData.username}
                 onChange={e => setFormData({...formData, username: e.target.value})}
               />
             </div>
@@ -560,15 +567,55 @@ export default function App(): React.JSX.Element {
                 type="password"
                 placeholder="Enter your password"
                 className="auth-input"
+                value={formData.password}
                 onChange={e => setFormData({...formData, password: e.target.value})}
               />
             </div>
           </div>
-          <button type="submit" className="auth-btn">
-            <span>{authMode === 'login' ? 'Sign In' : 'Create Account'}</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="auth-btn-icon"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          <button type="submit" className="auth-btn" disabled={isSubmitting}>
+            <span>{isSubmitting ? 'Connecting...' : (authMode === 'login' ? 'Sign In' : 'Create Account')}</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`auth-btn-icon ${isSubmitting ? 'animate-spin' : ''}`}>
+              {isSubmitting ? (
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
+              ) : (
+                <path d="M5 12h14M12 5l7 7-7 7"/>
+              )}
+            </svg>
           </button>
         </form>
+
+        {/* Quick Demo One-Click Access */}
+        <div className="mt-4 pt-3.5 border-t border-white/10 text-center">
+          <p className="text-[11px] text-white/50 mb-2 font-medium tracking-wide">⚡ Quick Demo One-Click Access:</p>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode('login');
+                const creds = { username: 'armin', password: '123' };
+                setFormData({ username: 'armin', password: '123', displayName: '' });
+                handleAuth(undefined, creds);
+              }}
+              disabled={isSubmitting}
+              className="px-3 py-2 bg-emerald-500/15 hover:bg-emerald-500/25 active:scale-95 text-emerald-300 text-[12px] font-medium rounded-xl border border-emerald-500/25 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              👤 Armin (Demo 1)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode('login');
+                const creds = { username: 'echo', password: '123' };
+                setFormData({ username: 'echo', password: '123', displayName: '' });
+                handleAuth(undefined, creds);
+              }}
+              disabled={isSubmitting}
+              className="px-3 py-2 bg-blue-500/15 hover:bg-blue-500/25 active:scale-95 text-blue-300 text-[12px] font-medium rounded-xl border border-blue-500/25 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              🤖 Echo Bot (Demo 2)
+            </button>
+          </div>
+        </div>
 
         <p className="auth-switch">
           {authMode === 'login' ? "Don't have an account? " : "Already have an account? "}
