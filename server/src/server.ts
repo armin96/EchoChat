@@ -50,29 +50,29 @@ export interface IUserDocument extends Document {
 }
 
 const userSchema = new Schema<IUserDocument>({
-    username: { 
-        type: String, 
-        unique: true, 
-        required: true, 
+    username: {
+        type: String,
+        unique: true,
+        required: true,
         trim: true,
         lowercase: true,
         minlength: [3, 'Username must be at least 3 characters long']
     },
-    password: { 
-        type: String, 
-        required: true 
+    password: {
+        type: String,
+        required: true
     },
-    displayName: { 
-        type: String, 
-        default: '' 
+    displayName: {
+        type: String,
+        default: ''
     },
-    avatar: { 
-        type: String, 
-        default: '' 
+    avatar: {
+        type: String,
+        default: ''
     },
-    lastSeen: { 
-        type: Date, 
-        default: Date.now 
+    lastSeen: {
+        type: Date,
+        default: Date.now
     }
 }, { timestamps: true });
 
@@ -105,33 +105,33 @@ export interface IMessageDocument extends Document {
 }
 
 const messageSchema = new Schema<IMessageDocument>({
-    senderId: { 
-        type: String, 
-        required: true, 
-        index: true 
+    senderId: {
+        type: String,
+        required: true,
+        index: true
     },
-    receiverId: { 
-        type: String, 
-        required: true, 
-        index: true 
+    receiverId: {
+        type: String,
+        required: true,
+        index: true
     },
-    content: { 
-        type: String, 
-        required: true 
+    content: {
+        type: String,
+        required: true
     },
-    type: { 
-        type: String, 
-        enum: ['text', 'image', 'video', 'audio', 'application'], 
-        default: 'text' 
+    type: {
+        type: String,
+        enum: ['text', 'image', 'video', 'audio', 'application'],
+        default: 'text'
     },
-    fileName: { 
-        type: String, 
-        default: '' 
+    fileName: {
+        type: String,
+        default: ''
     },
-    timestamp: { 
-        type: Date, 
-        default: Date.now, 
-        index: true 
+    timestamp: {
+        type: Date,
+        default: Date.now,
+        index: true
     }
 });
 
@@ -227,11 +227,11 @@ connectDatabase();
 
 // Health check endpoint
 app.get('/', (req: Request, res: Response) => {
-    res.json({ 
-        status: 'healthy', 
-        name: 'EchoChat TypeScript API', 
-        version: '1.0.0', 
-        timestamp: new Date() 
+    res.json({
+        status: 'healthy',
+        name: 'EchoChat TypeScript API',
+        version: '1.0.0',
+        timestamp: new Date()
     });
 });
 
@@ -335,8 +335,8 @@ app.post('/update-profile', authenticateToken, async (req: AuthenticatedRequest,
     try {
         const { userId, avatar } = req.body;
         const updatedUser = await User.findByIdAndUpdate(
-            userId, 
-            { avatar }, 
+            userId,
+            { avatar },
             { new: true }
         ).select('-password');
 
@@ -344,9 +344,9 @@ app.post('/update-profile', authenticateToken, async (req: AuthenticatedRequest,
             return res.status(404).json({ error: 'User not found.' });
         }
 
-        io.emit('profile_updated', { 
-            userId: updatedUser._id, 
-            avatar: updatedUser.avatar 
+        io.emit('profile_updated', {
+            userId: updatedUser._id,
+            avatar: updatedUser.avatar
         });
 
         return res.json(updatedUser);
@@ -371,8 +371,8 @@ app.post('/update-username', authenticateToken, async (req: AuthenticatedRequest
         }
 
         const updatedUser = await User.findByIdAndUpdate(
-            userId, 
-            { username: normalizedUsername }, 
+            userId,
+            { username: normalizedUsername },
             { new: true }
         ).select('-password');
 
@@ -380,10 +380,10 @@ app.post('/update-username', authenticateToken, async (req: AuthenticatedRequest
             return res.status(404).json({ error: 'User not found.' });
         }
 
-        io.emit('profile_updated', { 
-            userId: updatedUser._id, 
-            avatar: updatedUser.avatar, 
-            username: updatedUser.username 
+        io.emit('profile_updated', {
+            userId: updatedUser._id,
+            avatar: updatedUser.avatar,
+            username: updatedUser.username
         });
 
         return res.json(updatedUser);
