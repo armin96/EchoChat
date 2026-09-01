@@ -3,24 +3,39 @@
 ![EchoChat Banner](https://github.com/user-attachments/assets/8494d55f-6ad6-4c10-89c6-0bd674f1aec9)
 
 <p align="center">
-  <strong>A modern, high-performance real-time messaging and WebRTC video calling platform built with React, Node.js, Socket.io, and Agora SDK.</strong>
+  <strong>A modern, high-performance real-time messaging and WebRTC video calling platform built with React 19, TypeScript, Node.js, Socket.io, and Agora SDK.</strong>
 </p>
 
-<p align="center">
-  <a href="https://echo-chat-navy.vercel.app/" target="_blank">
-    <img src="https://img.shields.io/badge/🚀_Live_Demo-View_EchoChat-0070F3?style=for-the-badge&logo=vercel&logoColor=white" alt="Live Demo" />
-  </a>
-</p>
+---
+
+<div align="center">
+
+### 🌐 [Click Here to Open Live Demo (echo-chat-navy.vercel.app)](https://echo-chat-navy.vercel.app/)
+
+[![Live Demo](https://img.shields.io/badge/🚀_LAUNCH_LIVE_DEMO-echo--chat--navy.vercel.app-0070F3?style=for-the-badge&logo=vercel&logoColor=white)](https://echo-chat-navy.vercel.app/)
+[![Backend Status](https://img.shields.io/badge/Backend_API-Online_(Render)-339933?style=for-the-badge&logo=render&logoColor=white)](https://echochat-1-pa5a.onrender.com/)
+
+#### ⚡ Instant Test Accounts (Pre-filled for Recruiters):
+| Account | Username | Password | Role / Details |
+|---|---|---|---|
+| **Demo Lead** | `armin` | `123` | Full-Stack Lead (Loaded with rich team chats & mockups) |
+| **Echo Bot** | `echo` | `123` | AI Testing Companion (Great for dual-browser live calls) |
+
+> 💡 *Tip: Open a regular browser tab with **`armin`** and an Incognito tab with **`echo`** to test **real-time chat and live WebRTC video calling** between two active sessions!*
+
+</div>
+
+---
 
 <p align="center">
   <img src="https://img.shields.io/badge/React-19.2-61DAFB?logo=react&logoColor=black" alt="React" />
+  <img src="https://img.shields.io/badge/TypeScript-5.0-3178C6?logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Vite-7.2-646CFF?logo=vite&logoColor=white" alt="Vite" />
   <img src="https://img.shields.io/badge/Tailwind_CSS-4.1-38B2AC?logo=tailwind-css&logoColor=white" alt="Tailwind CSS" />
   <img src="https://img.shields.io/badge/Node.js-18+-339933?logo=node.js&logoColor=white" alt="Node.js" />
   <img src="https://img.shields.io/badge/Express-4.18-000000?logo=express&logoColor=white" alt="Express" />
   <img src="https://img.shields.io/badge/Socket.io-4.6-010101?logo=socket.io&logoColor=white" alt="Socket.io" />
   <img src="https://img.shields.io/badge/WebRTC-Agora_RTC-099CEC?logo=webrtc&logoColor=white" alt="Agora WebRTC" />
-  <img src="https://img.shields.io/badge/MongoDB-Atlas_%26_In--Memory-47A248?logo=mongodb&logoColor=white" alt="MongoDB" />
   <img src="https://img.shields.io/badge/Security-bcrypt_%2B_JWT-critical" alt="Security" />
 </p>
 
