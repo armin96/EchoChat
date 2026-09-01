@@ -10,8 +10,10 @@ import {
 import { IUser, IMessage, ITheme, IIncomingCall, IZoomedImage, AuthMode } from './types/chat.ts';
 
 // Socket connection and Agora configuration
-const API_URL = import.meta.env.VITE_API_URL || 'https://echochat-1-pa5a.onrender.com';
-const socket = io(API_URL);
+const isProd = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
+const API_URL = isProd ? '/api' : (import.meta.env.VITE_API_URL || 'http://localhost:3000');
+const SOCKET_URL = isProd ? 'https://echochat-1-pa5a.onrender.com' : (import.meta.env.VITE_API_URL || 'http://localhost:3000');
+const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
 const AGORA_APP_ID = "7d833f08030d4926a9f8693377e64ba8"; 
 const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
 

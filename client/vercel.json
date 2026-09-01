@@ -1,6 +1,14 @@
 {
   "rewrites": [
     {
+      "source": "/socket.io/(.*)",
+      "destination": "https://echochat-1-pa5a.onrender.com/socket.io/$1"
+    },
+    {
+      "source": "/api/(.*)",
+      "destination": "https://echochat-1-pa5a.onrender.com/$1"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
