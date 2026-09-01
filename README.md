@@ -7,6 +7,12 @@
 </p>
 
 <p align="center">
+  <a href="https://echo-chat-topaz.vercel.app/" target="_blank">
+    <img src="https://img.shields.io/badge/🚀_Live_Demo-View_EchoChat-0070F3?style=for-the-badge&logo=vercel&logoColor=white" alt="Live Demo" />
+  </a>
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/React-19.2-61DAFB?logo=react&logoColor=black" alt="React" />
   <img src="https://img.shields.io/badge/Vite-7.2-646CFF?logo=vite&logoColor=white" alt="Vite" />
   <img src="https://img.shields.io/badge/Tailwind_CSS-4.1-38B2AC?logo=tailwind-css&logoColor=white" alt="Tailwind CSS" />
