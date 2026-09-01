@@ -186,6 +186,9 @@ export default function App(): React.JSX.Element {
       if (res.ok) {
         const data: IUser[] = await res.json();
         setChats(data);
+        if (data.length > 0 && !activeChatRef.current && window.innerWidth > 768) {
+          setActiveChat(data[0]);
+        }
       }
     } catch (err) {
       console.error("Error fetching chats:", err);

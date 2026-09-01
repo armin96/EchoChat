@@ -203,16 +203,104 @@ const connectDatabase = async (): Promise<void> => {
         }
     }
 
-    // Seed default demo accounts if database is empty
+    // Seed rich default demo accounts and realistic recruiter-ready conversation history
     try {
-        const count = await User.countDocuments();
-        if (count === 0) {
-            const seedPassword = '123';
-            const user1 = new User({ username: 'armin', password: seedPassword, displayName: 'Armin', avatar: '' });
-            const user2 = new User({ username: 'echo', password: seedPassword, displayName: 'Echo Bot', avatar: '' });
-            await user1.save();
-            await user2.save();
-            console.log("🌱 Default demo users seeded: armin (password: 123), echo (password: 123)");
+        const seedPassword = '123';
+
+        // Check if demo users exist or create them
+        const demoUsersData = [
+            { username: 'armin', displayName: 'Armin (Lead)', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80' },
+            { username: 'sara', displayName: 'Sara Rostami (UI/UX)', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80' },
+            { username: 'echo', displayName: 'Echo AI Bot 🤖', avatar: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80' },
+            { username: 'david', displayName: 'David Chen (Tech Lead)', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80' },
+            { username: 'elena', displayName: 'Elena Vance (Frontend)', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80' },
+            { username: 'alex', displayName: 'Alex Rivera (DevOps)', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80' }
+        ];
+
+        const usersMap: Record<string, IUserDocument> = {};
+
+        for (const u of demoUsersData) {
+            let userDoc = await User.findOne({ username: u.username });
+            if (!userDoc) {
+                userDoc = new User({
+                    username: u.username,
+                    password: seedPassword,
+                    displayName: u.displayName,
+                    avatar: u.avatar,
+                    lastSeen: new Date(Date.now() - Math.floor(Math.random() * 3600000))
+                });
+                await userDoc.save();
+            }
+            usersMap[u.username] = userDoc;
+        }
+
+        console.log("🌱 Demo accounts verified & seeded:", Object.keys(usersMap).join(', '));
+
+        // Seed rich conversation history if messages collection is empty
+        const messageCount = await Message.countDocuments();
+        if (messageCount === 0 && usersMap['armin']) {
+            const arminId = usersMap['armin']._id.toString();
+            const saraId = usersMap['sara']?._id.toString();
+            const echoId = usersMap['echo']?._id.toString();
+            const davidId = usersMap['david']?._id.toString();
+            const elenaId = usersMap['elena']?._id.toString();
+            const alexId = usersMap['alex']?._id.toString();
+
+            const now = Date.now();
+            const seedMessages = [];
+
+            // Conversation with Sara (UI/UX)
+            if (saraId) {
+                seedMessages.push(
+                    { senderId: saraId, receiverId: arminId, content: "Hey Armin! I just reviewed the new Glassmorphism design for EchoChat. The blur effects and colors look amazing! 🔥", type: 'text', timestamp: new Date(now - 1000 * 60 * 45) },
+                    { senderId: arminId, receiverId: saraId, content: "Thanks Sara! Glad you like it. I added 10 dynamic curated themes including Cyber Neon and Luxury Gold.", type: 'text', timestamp: new Date(now - 1000 * 60 * 40) },
+                    { senderId: saraId, receiverId: arminId, content: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80", type: 'image', fileName: 'design_system_preview.png', timestamp: new Date(now - 1000 * 60 * 30) },
+                    { senderId: saraId, receiverId: arminId, content: "Here is the mobile mockup preview we finalized yesterday. Notice the sleek responsive layout! 📱", type: 'text', timestamp: new Date(now - 1000 * 60 * 28) },
+                    { senderId: arminId, receiverId: saraId, content: "Looks pixel perfect. Agora WebRTC video calling integration is also 100% active and tested.", type: 'text', timestamp: new Date(now - 1000 * 60 * 15) },
+                    { senderId: saraId, receiverId: arminId, content: "Awesome! Ready for client and recruiter demonstration 🚀✨", type: 'text', timestamp: new Date(now - 1000 * 60 * 5) }
+                );
+            }
+
+            // Conversation with Echo AI Bot
+            if (echoId) {
+                seedMessages.push(
+                    { senderId: echoId, receiverId: arminId, content: "👋 Hello Armin! Welcome to EchoChat. I am your real-time testing companion bot.", type: 'text', timestamp: new Date(now - 1000 * 60 * 120) },
+                    { senderId: arminId, receiverId: echoId, content: "Hey Echo, can you confirm the WebSocket latency and multimedia attachments?", type: 'text', timestamp: new Date(now - 1000 * 60 * 110) },
+                    { senderId: echoId, receiverId: arminId, content: "All systems are operational! ⚡ WebSocket latency is sub-30ms, and multimedia handling supports Base64 images, voice notes, and documents.", type: 'text', timestamp: new Date(now - 1000 * 60 * 105) },
+                    { senderId: echoId, receiverId: arminId, content: "Try sending a photo, voice note, or initiating an Agora video call! 📹🎙️", type: 'text', timestamp: new Date(now - 1000 * 60 * 100) }
+                );
+            }
+
+            // Conversation with David Chen (Tech Lead)
+            if (davidId) {
+                seedMessages.push(
+                    { senderId: davidId, receiverId: arminId, content: "Armin, the TypeScript architecture and state management look super clean. Great job on the JWT security middleware.", type: 'text', timestamp: new Date(now - 1000 * 60 * 200) },
+                    { senderId: arminId, receiverId: davidId, content: "Thank you David! Bcrypt password hashing and sanitized payloads are protecting all REST endpoints.", type: 'text', timestamp: new Date(now - 1000 * 60 * 180) },
+                    { senderId: davidId, receiverId: arminId, content: "Perfect. The zero-config in-memory database fallback makes live demonstrations completely frictionless.", type: 'text', timestamp: new Date(now - 1000 * 60 * 160) }
+                );
+            }
+
+            // Conversation with Elena Vance (Frontend)
+            if (elenaId) {
+                seedMessages.push(
+                    { senderId: elenaId, receiverId: arminId, content: "Hey Armin! The instant contact search and online presence indicators work lightning fast! ⚡", type: 'text', timestamp: new Date(now - 1000 * 60 * 300) },
+                    { senderId: arminId, receiverId: elenaId, content: "Yes! Socket.io broadcasts presence updates in real time to all active sockets.", type: 'text', timestamp: new Date(now - 1000 * 60 * 280) },
+                    { senderId: elenaId, receiverId: arminId, content: "The dynamic theme switcher is also one of my favorite features. Cyber Neon looks incredible in dark mode! 🌟", type: 'text', timestamp: new Date(now - 1000 * 60 * 250) }
+                );
+            }
+
+            // Conversation with Alex Rivera (DevOps)
+            if (alexId) {
+                seedMessages.push(
+                    { senderId: alexId, receiverId: arminId, content: "Hey Armin! Vercel reverse proxy and Render cloud deployment are running with 100% uptime.", type: 'text', timestamp: new Date(now - 1000 * 60 * 400) },
+                    { senderId: arminId, receiverId: alexId, content: "Awesome Alex, thanks for configuring the cloud proxy routing!", type: 'text', timestamp: new Date(now - 1000 * 60 * 380) }
+                );
+            }
+
+            if (seedMessages.length > 0) {
+                await Message.insertMany(seedMessages);
+                console.log(`💬 Seeded ${seedMessages.length} realistic conversation messages for demo!`);
+            }
         }
     } catch (seedErr) {
         console.error("❌ Database seeding error:", seedErr);
