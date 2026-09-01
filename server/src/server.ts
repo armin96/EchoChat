@@ -479,6 +479,6 @@ io.on('connection', (socket: Socket) => {
     });
 });
 
-server.listen(PORT, () => {
-    console.log(`🚀 EchoChat TypeScript Server running on port ${PORT}`);
+server.listen(Number(PORT), '0.0.0.0', () => {
+    console.log(`🚀 EchoChat TypeScript Server running on 0.0.0.0:${PORT}`);
 });
